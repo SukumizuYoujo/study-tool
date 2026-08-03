@@ -1,0 +1,87 @@
+<!-- HTMLファイルの末尾、既存のスクリプトブロックの代わりに以下を記述 -->
+<script type="module">
+    // 1. Firebase SDKのインポート (CDN経由)
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+    import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc } 
+        from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+    // 2. コピーしたFirebaseの設定を貼り付け
+    const firebaseConfig = {
+        apiKey: "AIzaSyDW7ZRsdIf9FzG_ys4mX2IH0ardbWC3vcw",
+        authDomain: "study-tool-7ad05.firebaseapp.com",
+        projectId: "study-tool-7ad05",
+        storageBucket: "study-tool-7ad05.firebasestorage.app",
+        messagingSenderId: "468787913469",
+        appId: "1:468787913469:web:24170799379da52e6f5494",
+        measurementId: "G-M8Q87T29BB"
+    };
+
+    // 3. 初期化
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const tasksRef = collection(db, "tasks");
+
+    // --- 以降、既存のロジックをFirebase対応に書き換え ---
+
+    // タスク一覧のリアルタイム監視（データが変更されると自動でUIが更新される）
+    onSnapshot(tasksRef, (snapshot) => {
+        tasks = []; // グローバル変数のtasksをリセット
+        snapshot.forEach((doc) => {
+            tasks.push({ id: doc.id, ...doc.data() });
+        });
+        renderTasks(); // UIの再描画
+    });
+
+    // タスク追加関数をグローバルから呼び出せるようにwindowオブジェクトに登録
+    window.addTask = async function() {
+        const taskInput = document.getElementById('taskInput');
+        if(!taskInput.value.trim()) return;
+        
+        const selectedCatId = document.querySelector('input[name="category"]:checked').value;
+        
+        // Firestoreへ保存（これだけで全端末に同期されます）
+        await addDoc(tasksRef, {
+            title: taskInput.value,
+            categoryId: selectedCatId,
+            completed: false,
+            createdAt: new Date()
+        });
+        
+        taskInput.value = '';
+    };
+
+    // タスク完了の切り替え
+    window.toggleTaskCompletion = async function(id, currentStatus) {
+        const taskDoc = doc(db, "tasks", id);
+        // Firestoreのデータを更新
+        await updateDoc(taskDoc, {
+            completed: !currentStatus
+        });
+    };
+</script>
+
+
+
+<script type="module">
+  // Import the functions you need from the SDKs you need
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-analytics.js";
+  // TODO: Add SDKs for Firebase products that you want to use
+  // https://firebase.google.com/docs/web/setup#available-libraries
+
+  // Your web app's Firebase configuration
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+  const firebaseConfig = {
+    apiKey: "AIzaSyDW7ZRsdIf9FzG_ys4mX2IH0ardbWC3vcw",
+    authDomain: "study-tool-7ad05.firebaseapp.com",
+    projectId: "study-tool-7ad05",
+    storageBucket: "study-tool-7ad05.firebasestorage.app",
+    messagingSenderId: "468787913469",
+    appId: "1:468787913469:web:24170799379da52e6f5494",
+    measurementId: "G-M8Q87T29BB"
+  };
+
+  // Initialize Firebase
+  const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
+</script>
