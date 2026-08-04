@@ -5,8 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#475569">
-    <link rel="apple-touch-icon" href="icon-192.png">
-    <title>学習・タスク管理ツール</title>
+    <link rel="icon" href="favicon/favicon.ico" sizes="48x48">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon/favicon-32x32.png">
+    <link rel="apple-touch-icon" href="favicon/apple-touch-icon.png">
+    <title>Workflow - 音楽とポッドキャストで集中できる学習・タスク管理ツール</title>
+    <meta name="description" content="ポモドーロタイマー、ToDoリスト、Spotify・ポッドキャスト・ローカル音楽の再生機能を一つにまとめた、集中力を高めるための無料学習・タスク管理アプリです。">
+    <meta name="keywords" content="タスク管理,ToDoリスト,ポモドーロタイマー,学習ツール,Spotify,ポッドキャスト,集中">
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/@phosphor-icons/web"></script>
@@ -60,14 +64,17 @@
         const provider = new GoogleAuthProvider();
         const tasksRef = collection(db, "tasks");
         const logsRef = collection(db, "studyLogs"); 
+        const podcastFavRef = collection(db, "podcastFavorites");
 
         window.db = db;
         window.currentUser = null;
         let unsubscribeTasks = null;
         let unsubscribeLogs = null;
+        let unsubscribePodcastFavs = null;
 
         loadLocalTasks();
         loadLocalLogs();
+        loadLocalPodcastFavs();
 
         onAuthStateChanged(auth, async (user) => {
             const authBtn = document.getElementById('authBtn');
@@ -80,6 +87,7 @@
 
                 await migrateLocalTasksToCloud(user.uid);
                 await migrateLocalLogsToCloud(user.uid);
+                await migrateLocalPodcastFavsToCloud(user.uid);
                 
                 const qTasks = query(tasksRef, where("userId", "==", user.uid));
                 unsubscribeTasks = onSnapshot(qTasks, (snapshot) => {
@@ -95,6 +103,16 @@
                     if (typeof window.updateChart === "function") window.updateChart();
                 });
 
+                const qPodcastFavs = query(podcastFavRef, where("userId", "==", user.uid));
+                unsubscribePodcastFavs = onSnapshot(qPodcastFavs, (snapshot) => {
+                    window.podcastFavorites = [];
+                    snapshot.forEach((doc) => { window.podcastFavorites.push({ id: doc.id, ...doc.data() }); });
+                    window.podcastFavorites.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+                    if (typeof window.renderPodcastFavorites === "function") window.renderPodcastFavorites();
+                    if (typeof window.renderPodcastEpisodeList === "function") window.renderPodcastEpisodeList();
+                    if (typeof window.updatePlayerFavBtn === "function") window.updatePlayerFavBtn();
+                });
+
             } else {
                 window.currentUser = null;
                 authBtn.innerHTML = '<i class="ph ph-google-logo"></i>';
@@ -103,12 +121,15 @@
                 
                 if (unsubscribeTasks) { unsubscribeTasks(); unsubscribeTasks = null; }
                 if (unsubscribeLogs) { unsubscribeLogs(); unsubscribeLogs = null; }
+                if (unsubscribePodcastFavs) { unsubscribePodcastFavs(); unsubscribePodcastFavs = null; }
                 
                 loadLocalTasks();
                 loadLocalLogs();
+                loadLocalPodcastFavs();
             }
         });
 
+        // --- タスク関連 ---
         function loadLocalTasks() {
             const saved = localStorage.getItem('local_tasks');
             window.tasks = saved ? JSON.parse(saved) : [];
@@ -141,11 +162,10 @@
             const selectedCatId = document.querySelector('input[name="category"]:checked').value;
             const newOrder = window.tasks.length > 0 ? Math.max(...window.tasks.map(t => t.order || 0)) + 1 : 0;
             
-            // 動的履歴に保存（重複排除して最新を上に追加）
             window.taskHistory = window.taskHistory.filter(t => t.title !== title);
             window.taskHistory.unshift({ title: title, categoryId: selectedCatId });
             if (window.taskHistory.length > 50) window.taskHistory.pop();
-            localStorage.setItem('workflow_task_history', JSON.stringify(window.taskHistory));
+            localStorage.setItem('workside_task_history', JSON.stringify(window.taskHistory));
             
             if (window.currentUser) {
                 await addDoc(tasksRef, { title: title, categoryId: selectedCatId, completed: false, createdAt: new Date(), userId: window.currentUser.uid, order: newOrder });
@@ -179,6 +199,7 @@
             }
         };
 
+        // --- 学習記録関連 ---
         function loadLocalLogs() {
             const saved = localStorage.getItem('local_study_logs');
             window.studyLogs = saved ? JSON.parse(saved) : [];
@@ -232,9 +253,100 @@
                 window.saveLocalTasks();
             }
         };
-    </script>
 
-    <script src="https://sdk.scdn.co/spotify-player.js"></script>
+        // --- Podcast保存関連 ---
+        function loadLocalPodcastFavs() {
+            const saved = localStorage.getItem('local_podcast_favs');
+            window.podcastFavorites = saved ? JSON.parse(saved) : [];
+            if (typeof window.renderPodcastFavorites === "function") window.renderPodcastFavorites();
+        }
+        window.saveLocalPodcastFavs = function() { 
+            localStorage.setItem('local_podcast_favs', JSON.stringify(window.podcastFavorites)); 
+        }
+
+        async function migrateLocalPodcastFavsToCloud(uid) {
+            const saved = localStorage.getItem('local_podcast_favs');
+            if (!saved) return;
+            const localFavs = JSON.parse(saved);
+            if (localFavs.length === 0) return;
+            const batch = writeBatch(db);
+            localFavs.forEach(fav => {
+                const newDocRef = doc(podcastFavRef);
+                batch.set(newDocRef, { 
+                    title: fav.title, link: fav.link, podcastTitle: fav.podcastTitle, pubDate: fav.pubDate,
+                    createdAt: new Date(fav.createdAt), userId: uid 
+                });
+            });
+            await batch.commit();
+            localStorage.removeItem('local_podcast_favs');
+        }
+
+        window.togglePodcastFavorite = async function(epTitle, epLink, pcTitle, pubDate) {
+            const existingFav = window.podcastFavorites.find(f => f.link === epLink);
+            
+            if (existingFav) {
+                // 削除
+                if (window.currentUser) {
+                    await deleteDoc(doc(db, "podcastFavorites", existingFav.id));
+                } else {
+                    window.podcastFavorites = window.podcastFavorites.filter(f => f.id !== existingFav.id);
+                    window.saveLocalPodcastFavs();
+                    window.renderPodcastFavorites();
+                    window.renderPodcastEpisodeList();
+                    window.updatePlayerFavBtn();
+                }
+            } else {
+                // 追加
+                if (window.podcastFavorites.length >= 30) {
+                    alert("「あとで聴く」は最大30件まで保存可能です。古いものを削除してください。");
+                    return;
+                }
+                if (window.currentUser) {
+                    await addDoc(podcastFavRef, { 
+                        title: epTitle, link: epLink, podcastTitle: pcTitle, pubDate: pubDate,
+                        createdAt: new Date(), userId: window.currentUser.uid 
+                    });
+                } else {
+                    window.podcastFavorites.unshift({ 
+                        id: Date.now().toString(), title: epTitle, link: epLink, podcastTitle: pcTitle,
+                        pubDate: pubDate, createdAt: new Date().toISOString() 
+                    });
+                    window.saveLocalPodcastFavs();
+                    window.renderPodcastFavorites();
+                    window.renderPodcastEpisodeList();
+                    window.updatePlayerFavBtn();
+                }
+            }
+        };
+
+        window.removePodcastFavorite = async function(id) {
+            if (window.currentUser) {
+                await deleteDoc(doc(db, "podcastFavorites", id));
+            } else {
+                window.podcastFavorites = window.podcastFavorites.filter(f => f.id !== id);
+                window.saveLocalPodcastFavs();
+                window.renderPodcastFavorites();
+                window.renderPodcastEpisodeList();
+                window.updatePlayerFavBtn();
+            }
+        };
+
+        // 再生終了時にリストから自動削除する関数
+        window.removePodcastFavoriteByLink = async function(link) {
+            const existingFav = window.podcastFavorites.find(f => f.link === link);
+            if (existingFav) {
+                if (window.currentUser) {
+                    await deleteDoc(doc(db, "podcastFavorites", existingFav.id));
+                } else {
+                    window.podcastFavorites = window.podcastFavorites.filter(f => f.id !== existingFav.id);
+                    window.saveLocalPodcastFavs();
+                    window.renderPodcastFavorites();
+                    window.renderPodcastEpisodeList();
+                }
+            }
+        };
+
+    </script>
 
     <style>
         :root {
@@ -256,6 +368,7 @@
             transition: background-color 0.3s, color 0.3s;
         }
 
+        /* カテゴリのラジオボタン（スマホでの見栄えを考慮し、paddingとフォントサイズを微調整） */
         input[type="radio"].category-radio { display: none; }
         input[type="radio"].category-radio:checked + label {
             background-color: var(--primary-color);
@@ -265,34 +378,42 @@
         
         .task-item.sortable-ghost { opacity: 0.5; background-color: var(--primary-color); }
         .module-section.sortable-ghost { opacity: 0.4; }
-        .section-header { cursor: grab; }
-        .section-header:active { cursor: grabbing; }
+        
+        /* 
+         * スマホでスクロールしやすくするため、ヘッダー全体ではなく
+         * 左上のタイトル部分のみをドラッグ可能（グリップ）に変更 
+         */
+        .drag-handle-module { cursor: grab; }
+        .drag-handle-module:active { cursor: grabbing; }
         
         input[type="range"] { accent-color: var(--primary-color); }
 
-        /* カラーピッカーのデフォルトUIを消す */
         input[type="color"] {
             appearance: none;
             border: none;
             border-radius: 4px;
             padding: 0;
             overflow: hidden;
-            cursor: pointer; /* クリック可能であることを示すため追加を推奨 */
+            cursor: pointer;
         }
         input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
         input[type="color"]::-webkit-color-swatch { border: none; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(156, 163, 175, 0.3); border-radius: 20px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: rgba(156, 163, 175, 0.5); }
     </style>
 </head>
 <body class="min-h-screen p-4 md:p-8 font-sans relative">
 
-    <!-- カスタムカラー設定ポップアップ (新規追加) -->
+    <!-- カスタムカラー設定モーダル -->
     <div id="themeModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity p-4">
         <div class="bg-themeBg text-themeText p-6 rounded-xl shadow-xl max-w-sm w-full border border-gray-400/20">
             <div class="flex justify-between items-center mb-6">
                 <h3 class="text-lg font-bold flex items-center gap-2"><i class="ph ph-palette"></i> カスタムカラー設定</h3>
                 <button onclick="closeThemeModal()" class="text-xl opacity-60 hover:opacity-100 transition"><i class="ph ph-x"></i></button>
             </div>
-            
             <div class="space-y-4 mb-6">
                 <div class="flex justify-between items-center">
                     <label class="text-sm font-medium">背景色 (Background)</label>
@@ -311,7 +432,6 @@
                     <input type="color" id="color-secondary" class="w-12 h-8 cursor-pointer shadow-sm" oninput="updateThemeString()">
                 </div>
             </div>
-
             <div class="border-t border-gray-400/20 pt-4 mb-6">
                 <label class="text-xs opacity-80 mb-2 block">共有用文字列 (インポート / エクスポート)</label>
                 <div class="flex gap-2">
@@ -320,25 +440,39 @@
                     <button onclick="copyThemeString()" class="px-3 py-2 bg-themeSecondary hover:bg-gray-400/20 border border-gray-400/30 rounded text-xs transition whitespace-nowrap shadow-sm" title="文字列をコピー"><i class="ph ph-copy"></i></button>
                 </div>
             </div>
-
             <button onclick="saveAndApplyThemeFromModal()" class="w-full py-3 bg-themePrimary text-white rounded-lg font-medium hover:opacity-90 transition shadow-md">
                 このカラーを適用する
             </button>
         </div>
     </div>
 
-    <div class="max-w-3xl mx-auto space-y-8 pb-20">
+    <!-- Podcast 視聴履歴モーダル -->
+    <div id="podcastHistoryModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity p-4">
+        <div class="bg-themeBg text-themeText p-6 rounded-xl shadow-xl max-w-md w-full border border-gray-400/20 flex flex-col max-h-[80vh]">
+            <div class="flex justify-between items-center mb-4 flex-shrink-0">
+                <h3 class="text-lg font-bold flex items-center gap-2"><i class="ph ph-clock-counter-clockwise"></i> 視聴履歴</h3>
+                <button onclick="closePodcastHistoryModal()" class="text-xl opacity-60 hover:opacity-100 transition"><i class="ph ph-x"></i></button>
+            </div>
+            <div class="overflow-y-auto custom-scrollbar flex-1 -mx-2 px-2">
+                <ul id="podcastHistoryList" class="divide-y divide-gray-400/20 text-sm">
+                    <!-- 履歴がここに入ります -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- アプリ本体コンテナ (スマホ時はパディングを減らして横幅を広く使う) -->
+    <div class="max-w-3xl mx-auto space-y-6 pb-20 sm:space-y-8 sm:pb-24">
         
-        <header class="flex justify-between items-center">
-            <h1 class="text-2xl font-bold flex items-center gap-2">
-                <i class="ph ph-kanban"></i> Workflow
+        <header class="flex justify-between items-center px-1">
+            <h1 class="text-xl sm:text-2xl font-bold flex items-center gap-2">
+                <i class="ph ph-kanban"></i> Workside
             </h1>
             <div class="flex gap-2 items-center">
                 <button id="authBtn" class="w-8 h-8 rounded-full bg-themePrimary text-white flex items-center justify-center border-2 border-transparent transition hover:opacity-80">
                     <i class="ph ph-spinner-gap animate-spin"></i>
                 </button>
                 <div class="w-px h-6 bg-gray-400/30 mx-1"></div>
-                <!-- テーマボタン (右端をカスタムカラーに変更) -->
                 <button onclick="setTheme('light')" class="w-6 h-6 rounded-full bg-[#f8fafc] border-2 border-gray-400" title="ライト"></button>
                 <button onclick="setTheme('dark')" class="w-6 h-6 rounded-full bg-[#0f172a] border-2 border-gray-400" title="ダーク"></button>
                 <button onclick="openThemeModal()" class="w-6 h-6 rounded-full bg-gradient-to-br from-pink-400 via-purple-400 to-blue-400 border-2 border-gray-400 flex items-center justify-center text-white" title="カスタムカラー">
@@ -347,25 +481,28 @@
             </div>
         </header>
 
-        <div id="moduleContainer" class="space-y-8">
+        <div id="moduleContainer" class="space-y-6 sm:space-y-8">
             
             <section id="section-todo" data-id="todo" class="module-section bg-themeSecondary rounded-xl shadow-sm overflow-hidden flex flex-col">
-                <div class="px-6 py-4 section-header flex justify-between items-center bg-gray-400/5 hover:bg-gray-400/10 transition">
-                    <h2 class="text-lg font-semibold flex items-center gap-2 pointer-events-none">
+                <div class="px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-gray-400/5 hover:bg-gray-400/10 transition">
+                    <!-- 左側のアイコンと文字の部分だけをドラッグ判定(drag-handle-module)にする -->
+                    <h2 class="text-lg font-semibold flex items-center gap-2 drag-handle-module px-2 py-1 -ml-2 rounded hover:bg-gray-400/20 select-none" title="ドラッグして並べ替え">
+                        <i class="ph ph-dots-six-vertical opacity-50"></i>
                         <i class="ph ph-list-checks"></i> ToDoリスト
                     </h2>
-                    <button onclick="toggleSection('todo')" class="p-1 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
+                    <button onclick="toggleSection('todo')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
                         <i class="ph ph-caret-up" id="icon-toggle-todo"></i>
                     </button>
                 </div>
-                <div id="content-todo" class="px-6 pb-6 pt-2">
+                <div id="content-todo" class="px-4 sm:px-6 pb-6 pt-2">
                     <div class="space-y-4 mb-6">
                         <div class="relative">
-                            <input type="text" id="taskInput" placeholder="タスクを入力" class="w-full p-3 rounded-lg bg-themeBg border border-gray-400/30 focus:outline-none focus:ring-2 focus:ring-themePrimary" oninput="handleTaskInput()" onfocus="handleTaskInput()">
-                            <ul id="suggestList" class="absolute z-10 w-full bg-themeBg border border-gray-400/30 rounded-lg mt-1 hidden max-h-40 overflow-y-auto shadow-lg"></ul>
+                            <input type="text" id="taskInput" placeholder="タスクを入力" class="w-full p-3 rounded-lg bg-themeBg border border-gray-400/30 focus:outline-none focus:ring-2 focus:ring-themePrimary text-sm sm:text-base" oninput="handleTaskInput()" onfocus="handleTaskInput()">
+                            <ul id="suggestList" class="absolute z-10 w-full bg-themeBg border border-gray-400/30 rounded-lg mt-1 hidden max-h-40 overflow-y-auto shadow-lg custom-scrollbar"></ul>
                         </div>
-                        <div class="flex flex-wrap gap-2" id="categoryContainer"></div>
-                        <button onclick="addTask()" class="w-full py-3 rounded-lg bg-themePrimary text-white font-medium hover:opacity-90 transition">
+                        <!-- スマホ画面で崩れないように gap-1, py-1, text-xs などを調整 -->
+                        <div class="flex flex-wrap gap-1 sm:gap-2" id="categoryContainer"></div>
+                        <button onclick="addTask()" class="w-full py-3 rounded-lg bg-themePrimary text-white font-medium hover:opacity-90 transition text-sm sm:text-base shadow-sm">
                             タスクを追加
                         </button>
                     </div>
@@ -374,189 +511,215 @@
             </section>
 
             <section id="section-timer" data-id="timer" class="module-section bg-themeSecondary rounded-xl shadow-sm overflow-hidden flex flex-col">
-                <div class="px-6 py-4 section-header flex justify-between items-center bg-gray-400/5 hover:bg-gray-400/10 transition">
-                    <h2 class="text-lg font-semibold flex items-center gap-2 pointer-events-none">
+                <div class="px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-gray-400/5 hover:bg-gray-400/10 transition">
+                    <h2 class="text-lg font-semibold flex items-center gap-2 drag-handle-module px-2 py-1 -ml-2 rounded hover:bg-gray-400/20 select-none" title="ドラッグして並べ替え">
+                        <i class="ph ph-dots-six-vertical opacity-50"></i>
                         <i class="ph ph-timer"></i> Focus Timer
                     </h2>
-                    <button onclick="toggleSection('timer')" class="p-1 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
+                    <button onclick="toggleSection('timer')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
                         <i class="ph ph-caret-up" id="icon-toggle-timer"></i>
                     </button>
                 </div>
-                <div id="content-timer" class="px-6 pb-12 pt-4 text-center">
-                    <div id="activeTaskDisplay" class="mb-6 text-lg font-medium opacity-90">タスクを選択してください</div>
-                    <div class="text-6xl font-bold font-mono tracking-tighter mb-8" id="timerDisplay">25:00</div>
+                <div id="content-timer" class="px-4 sm:px-6 pb-10 pt-4 text-center">
+                    <div id="activeTaskDisplay" class="mb-4 text-base sm:text-lg font-medium opacity-90 truncate px-2">タスクを選択してください</div>
+                    <div class="text-[5rem] sm:text-7xl font-bold font-mono tracking-tighter mb-6 leading-none" id="timerDisplay">25:00</div>
                     <div class="flex justify-center gap-4">
-                        <button onclick="toggleTimer()" class="p-4 rounded-full bg-themePrimary text-white hover:opacity-90 transition shadow-md w-16 h-16 flex items-center justify-center">
-                            <i class="ph ph-play text-2xl" id="playPauseIcon"></i>
+                        <button onclick="toggleTimer()" class="p-4 rounded-full bg-themePrimary text-white hover:opacity-90 transition shadow-md w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
+                            <i class="ph ph-play text-2xl sm:text-3xl" id="playPauseIcon"></i>
                         </button>
-                        <button onclick="resetTimer()" class="p-4 rounded-full bg-themeBg text-themeText hover:bg-gray-400/20 transition shadow-md w-16 h-16 flex items-center justify-center">
-                            <i class="ph ph-arrow-counter-clockwise text-2xl"></i>
+                        <button onclick="resetTimer()" class="p-4 rounded-full bg-themeBg text-themeText hover:bg-gray-400/20 transition shadow-md w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
+                            <i class="ph ph-arrow-counter-clockwise text-2xl sm:text-3xl"></i>
                         </button>
                     </div>
                 </div>
             </section>
 
             <section id="section-audio" data-id="audio" class="module-section bg-themeSecondary rounded-xl shadow-sm overflow-hidden flex flex-col">
-                <div class="px-6 py-4 section-header flex justify-between items-center bg-gray-400/5 hover:bg-gray-400/10 transition">
-                    <h2 class="text-lg font-semibold flex items-center gap-2 pointer-events-none">
+                <div class="px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-gray-400/5 hover:bg-gray-400/10 transition">
+                    <h2 class="text-lg font-semibold flex items-center gap-2 drag-handle-module px-2 py-1 -ml-2 rounded hover:bg-gray-400/20 select-none" title="ドラッグして並べ替え">
+                        <i class="ph ph-dots-six-vertical opacity-50"></i>
                         <i class="ph ph-speaker-hifi"></i> オーディオ
                     </h2>
-                    <button onclick="toggleSection('audio')" class="p-1 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
+                    <button onclick="toggleSection('audio')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
                         <i class="ph ph-caret-up" id="icon-toggle-audio"></i>
                     </button>
                 </div>
-                <div id="content-audio" class="px-6 pb-6 pt-2">
-                    <div class="flex gap-2 border-b border-gray-400/30 pb-2 mb-4">
-                        <button onclick="switchAudioTab('local')" id="tabBtn_local" class="px-4 py-2 text-sm font-medium border-b-2 border-themePrimary text-themePrimary transition">Local</button>
-                        <button onclick="switchAudioTab('spotify')" id="tabBtn_spotify" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent opacity-60 hover:opacity-100 transition">Spotify</button>
-                        <button onclick="switchAudioTab('podcast')" id="tabBtn_podcast" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent opacity-60 hover:opacity-100 transition">Podcast</button>
+                <div id="content-audio" class="px-4 sm:px-6 pb-6 pt-2">
+                    <div class="flex gap-1 sm:gap-2 border-b border-gray-400/30 pb-2 mb-4">
+                        <button onclick="switchAudioTab('local')" id="tabBtn_local" class="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium border-b-2 border-themePrimary text-themePrimary transition">Local</button>
+                        <button onclick="switchAudioTab('spotify')" id="tabBtn_spotify" class="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium border-b-2 border-transparent opacity-60 hover:opacity-100 transition">Spotify</button>
+                        <button onclick="switchAudioTab('podcast')" id="tabBtn_podcast" class="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium border-b-2 border-transparent opacity-60 hover:opacity-100 transition">Podcast</button>
                     </div>
 
+                    <!-- Local Audio -->
                     <div id="tabContent_local" class="space-y-4">
                         <div class="flex items-center gap-2 mb-2">
-                            <select id="playlistSelector" onchange="changePlaylist()" class="flex-1 p-2 rounded-lg bg-themeBg border border-gray-400/30 focus:outline-none text-sm">
+                            <select id="playlistSelector" onchange="changePlaylist()" class="flex-1 p-2 rounded-lg bg-themeBg border border-gray-400/30 focus:outline-none text-xs sm:text-sm truncate">
                                 <option value="default">デフォルトプレイリスト</option>
                             </select>
-                            <button onclick="createNewPlaylist()" class="px-3 py-2 rounded-lg bg-themePrimary text-white text-sm hover:opacity-90 transition whitespace-nowrap"><i class="ph ph-plus"></i> 新規</button>
-                            <button onclick="deleteCurrentPlaylist()" class="px-3 py-2 rounded-lg border border-red-500/50 text-red-500 text-sm hover:bg-red-500/10 transition whitespace-nowrap"><i class="ph ph-trash"></i></button>
+                            <button onclick="createNewPlaylist()" class="px-3 py-2 rounded-lg bg-themePrimary text-white text-xs sm:text-sm hover:opacity-90 transition whitespace-nowrap shadow-sm"><i class="ph ph-plus"></i> 新規</button>
+                            <button onclick="deleteCurrentPlaylist()" class="px-3 py-2 rounded-lg border border-red-500/50 text-red-500 text-xs sm:text-sm hover:bg-red-500/10 transition whitespace-nowrap"><i class="ph ph-trash"></i></button>
                         </div>
                         <div id="dropZone" class="flex items-center gap-4 transition-colors duration-200">
-                            <label class="flex-1 cursor-pointer bg-themeBg border-2 border-dashed border-gray-400 p-6 rounded-lg text-center hover:bg-themePrimary/10 transition">
-                                <i class="ph ph-upload-simple text-2xl mb-2"></i>
-                                <div class="text-sm font-medium">音楽ファイルを追加 (複数可)</div>
+                            <label class="flex-1 cursor-pointer bg-themeBg border-2 border-dashed border-gray-400 p-4 sm:p-6 rounded-lg text-center hover:bg-themePrimary/10 transition">
+                                <i class="ph ph-upload-simple text-2xl mb-1 sm:mb-2"></i>
+                                <div class="text-xs sm:text-sm font-medium">音楽ファイルを追加 (複数可)</div>
                                 <input type="file" id="audioFileInput" accept="audio/*" multiple class="hidden" onchange="handleAudioUpload(event)">
                             </label>
                         </div>
-                        <div class="bg-themeBg p-4 rounded-lg border border-gray-400/20 space-y-3 shadow-sm">
-                            <div class="flex justify-between text-sm font-medium" id="audioFileName">再生中の曲はありません</div>
-                            <div class="flex items-center gap-3 text-xs font-mono">
+                        <!-- スマホ向けに Flexbox を折り返し(flex-wrap)対応に -->
+                        <div class="bg-themeBg p-3 sm:p-4 rounded-lg border border-gray-400/20 space-y-3 shadow-sm">
+                            <div class="text-xs sm:text-sm font-medium truncate" id="audioFileName">再生中の曲はありません</div>
+                            <div class="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs font-mono">
                                 <span id="audioCurrentTime">00:00</span>
                                 <input type="range" id="audioSeekBar" value="0" min="0" step="1" class="flex-1 cursor-pointer" onchange="seekAudio()" disabled>
                                 <span id="audioDuration">00:00</span>
                             </div>
-                            <div class="flex justify-between items-center pt-2">
-                                <div class="flex items-center gap-3">
+                            <div class="flex flex-wrap justify-between items-center pt-2 gap-y-3">
+                                <div class="flex items-center gap-2 sm:gap-3">
                                     <div class="flex items-center gap-1">
                                         <select id="audioSpeed" class="bg-themeSecondary text-themeText text-xs p-1 rounded border border-gray-400/30 focus:outline-none" onchange="changeAudioSpeed()" disabled>
                                             <option value="0.5">0.5x</option><option value="1.0" selected>1.0x</option><option value="1.5">1.5x</option><option value="2.0">2.0x</option>
                                         </select>
-                                        <button onclick="togglePlayMode()" id="btnPlayMode" class="w-8 h-8 flex items-center justify-center rounded hover:bg-gray-400/20 transition"><i class="ph ph-arrow-right text-lg" id="playModeIcon"></i></button>
+                                        <button onclick="togglePlayMode()" id="btnPlayMode" class="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center rounded hover:bg-gray-400/20 transition"><i class="ph ph-arrow-right text-base sm:text-lg" id="playModeIcon"></i></button>
                                     </div>
                                     <div class="flex items-center gap-1">
-                                        <i class="ph ph-speaker-high text-sm opacity-70"></i>
-                                        <input type="range" id="localVolume" value="1" min="0" max="1" step="0.05" class="w-16 cursor-pointer" oninput="changeLocalVolume()">
+                                        <i class="ph ph-speaker-high text-xs sm:text-sm opacity-70"></i>
+                                        <input type="range" id="localVolume" value="1" min="0" max="1" step="0.05" class="w-12 sm:w-16 cursor-pointer" oninput="changeLocalVolume()">
                                     </div>
                                 </div>
-                                <div class="flex gap-4 items-center">
-                                    <button onclick="playPrevTrack()" class="hover:opacity-70 disabled:opacity-30" id="btnPrevTrack" disabled><i class="ph ph-skip-back-circle text-2xl"></i></button>
-                                    <button onclick="toggleAudio()" class="w-12 h-12 rounded-full bg-themePrimary text-white flex items-center justify-center hover:opacity-90 disabled:opacity-50 shadow-md" id="btnPlayAudio" disabled><i class="ph ph-play text-xl" id="audioPlayIcon"></i></button>
-                                    <button onclick="playNextTrack()" class="hover:opacity-70 disabled:opacity-30" id="btnNextTrack" disabled><i class="ph ph-skip-forward-circle text-2xl"></i></button>
+                                <div class="flex gap-2 sm:gap-4 items-center mx-auto sm:mx-0">
+                                    <button onclick="playPrevTrack()" class="hover:opacity-70 disabled:opacity-30" id="btnPrevTrack" disabled><i class="ph ph-skip-back-circle text-xl sm:text-2xl"></i></button>
+                                    <button onclick="toggleAudio()" class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-themePrimary text-white flex items-center justify-center hover:opacity-90 disabled:opacity-50 shadow-md" id="btnPlayAudio" disabled><i class="ph ph-play text-lg sm:text-xl" id="audioPlayIcon"></i></button>
+                                    <button onclick="playNextTrack()" class="hover:opacity-70 disabled:opacity-30" id="btnNextTrack" disabled><i class="ph ph-skip-forward-circle text-xl sm:text-2xl"></i></button>
                                 </div>
                             </div>
                         </div>
-                        <div class="bg-themeBg rounded-lg border border-gray-400/20 max-h-48 overflow-y-auto">
-                            <ul id="localTrackList" class="divide-y divide-gray-400/20 text-sm"></ul>
+                        <div class="bg-themeBg rounded-lg border border-gray-400/20 max-h-48 overflow-y-auto custom-scrollbar">
+                            <ul id="localTrackList" class="divide-y divide-gray-400/20 text-xs sm:text-sm"></ul>
                         </div>
                         <audio id="localAudioPlayer" class="hidden"></audio>
                     </div>
 
+                    <!-- Spotify -->
                     <div id="tabContent_spotify" class="hidden space-y-4">
                         <div id="spotifyLoginSection" class="text-center py-6">
                             <i class="ph ph-spotify-logo text-4xl mb-2 opacity-80 text-[#1DB954]"></i>
-                            <div class="text-sm opacity-80 mb-4">Spotify Premiumアカウントで<br>音楽をストリーミング再生します</div>
-                            <button onclick="connectSpotify()" class="px-6 py-3 rounded-full bg-[#1DB954] text-white text-sm font-medium hover:opacity-90 transition shadow-md flex items-center gap-2 mx-auto">
+                            <div class="text-xs sm:text-sm opacity-80 mb-4">Spotify Premiumアカウントで<br>音楽をストリーミング再生します</div>
+                            <button onclick="connectSpotify()" class="px-4 sm:px-6 py-2 sm:py-3 rounded-full bg-[#1DB954] text-white text-xs sm:text-sm font-medium hover:opacity-90 transition shadow-md flex items-center gap-2 mx-auto">
                                 Connect to Spotify
                             </button>
                         </div>
-                        <div id="spotifyPlayerSection" class="hidden bg-themeBg p-4 rounded-lg border border-gray-400/20 space-y-3 shadow-sm">
-                            <div class="flex items-center gap-3">
-                                <div class="w-12 h-12 bg-gray-400/20 rounded flex items-center justify-center flex-shrink-0">
-                                    <i class="ph ph-music-notes text-xl opacity-50"></i>
+                        <div id="spotifyPlayerSection" class="hidden bg-themeBg p-3 sm:p-4 rounded-lg border border-gray-400/20 space-y-3 shadow-sm">
+                            <div class="flex items-center gap-2 sm:gap-3">
+                                <div class="w-10 h-10 sm:w-12 sm:h-12 bg-gray-400/20 rounded flex items-center justify-center flex-shrink-0">
+                                    <i class="ph ph-music-notes text-lg sm:text-xl opacity-50"></i>
                                 </div>
                                 <div class="flex-1 overflow-hidden">
-                                    <div id="sp-track-name" class="text-sm font-medium truncate">曲が選択されていません</div>
-                                    <div id="sp-artist-name" class="text-xs opacity-60 truncate">スマホ等のSpotifyアプリからこのデバイスを選択して再生してください</div>
+                                    <div id="sp-track-name" class="text-xs sm:text-sm font-medium truncate">曲が選択されていません</div>
+                                    <div id="sp-artist-name" class="text-[10px] sm:text-xs opacity-60 truncate">スマホ等のSpotifyアプリからこのデバイスを選択して再生してください</div>
                                 </div>
                             </div>
-                            <div class="flex justify-between items-center pt-2">
-                                <div class="w-24 hidden sm:block"></div> 
-                                <div class="flex justify-center items-center gap-6">
-                                    <button onclick="prevSpotifyTrack()" class="hover:opacity-70 transition"><i class="ph ph-skip-back text-xl"></i></button>
-                                    <button onclick="toggleSpotifyPlay()" class="w-12 h-12 rounded-full bg-[#1DB954] text-white flex items-center justify-center hover:opacity-90 transition shadow-md"><i class="ph ph-play text-xl" id="sp-play-icon"></i></button>
-                                    <button onclick="nextSpotifyTrack()" class="hover:opacity-70 transition"><i class="ph ph-skip-forward text-xl"></i></button>
+                            <div class="flex flex-wrap justify-between items-center pt-2 gap-y-3">
+                                <div class="w-16 hidden sm:block"></div> 
+                                <div class="flex justify-center items-center gap-4 sm:gap-6 mx-auto sm:mx-0">
+                                    <button onclick="prevSpotifyTrack()" class="hover:opacity-70 transition"><i class="ph ph-skip-back text-lg sm:text-xl"></i></button>
+                                    <button onclick="toggleSpotifyPlay()" class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-[#1DB954] text-white flex items-center justify-center hover:opacity-90 transition shadow-md"><i class="ph ph-play text-lg sm:text-xl" id="sp-play-icon"></i></button>
+                                    <button onclick="nextSpotifyTrack()" class="hover:opacity-70 transition"><i class="ph ph-skip-forward text-lg sm:text-xl"></i></button>
                                 </div>
-                                <div class="flex justify-end items-center gap-2 w-24">
-                                    <i class="ph ph-speaker-high text-sm opacity-70"></i>
-                                    <input type="range" id="spotifyVolume" value="0.5" min="0" max="1" step="0.05" class="w-16 cursor-pointer" oninput="changeSpotifyVolume()">
+                                <div class="flex justify-end items-center gap-1 sm:gap-2 w-full sm:w-24">
+                                    <i class="ph ph-speaker-high text-xs sm:text-sm opacity-70"></i>
+                                    <input type="range" id="spotifyVolume" value="0.5" min="0" max="1" step="0.05" class="w-20 cursor-pointer" oninput="changeSpotifyVolume()">
                                 </div>
                             </div>
                             <div id="sp-device-status" class="text-center text-[10px] opacity-50 pt-1">デバイスの初期化中...</div>
                         </div>
                     </div>
 
+                    <!-- Podcast -->
                     <div id="tabContent_podcast" class="hidden space-y-4">
-                        <div class="flex gap-2 mb-4">
-                            <input type="text" id="podcastRssInput" placeholder="RSSフィードのURLを入力..." class="flex-1 p-2 rounded-lg bg-themeBg border border-gray-400/30 focus:outline-none text-sm">
-                            <button onclick="loadPodcast()" class="px-4 py-2 rounded-lg bg-themePrimary text-white text-sm font-medium hover:opacity-90 transition">読込</button>
+                        <div class="flex gap-1 sm:gap-2 mb-4">
+                            <input type="text" id="podcastRssInput" placeholder="RSSフィードのURL..." class="flex-1 p-2 rounded-lg bg-themeBg border border-gray-400/30 focus:outline-none text-xs sm:text-sm">
+                            <button onclick="loadPodcast()" class="px-3 sm:px-4 py-2 rounded-lg bg-themePrimary text-white text-xs sm:text-sm font-medium hover:opacity-90 transition whitespace-nowrap shadow-sm">読込</button>
+                            <button onclick="openPodcastHistoryModal()" class="px-2 sm:px-3 py-2 rounded-lg border border-gray-400/30 hover:bg-gray-400/10 transition text-sm flex items-center justify-center whitespace-nowrap shadow-sm" title="視聴履歴"><i class="ph ph-clock-counter-clockwise text-lg"></i></button>
                         </div>
-                        <div id="podcastLoading" class="hidden text-center py-8 text-sm opacity-60">
-                            <i class="ph ph-spinner-gap animate-spin text-3xl mb-2"></i><br>エピソードを取得中...
+                        <div id="podcastLoading" class="hidden text-center py-8 text-xs sm:text-sm opacity-60">
+                            <i class="ph ph-spinner-gap animate-spin text-2xl sm:text-3xl mb-2"></i><br>エピソードを取得中...
                         </div>
-                        <div id="podcastPlaceholder" class="text-center py-8 text-sm opacity-60">
-                            <i class="ph ph-rss-simple text-3xl mb-2"></i><br>お気に入りのポッドキャストを追加
+                        <div id="podcastPlaceholder" class="text-center py-8 text-xs sm:text-sm opacity-60">
+                            <i class="ph ph-rss-simple text-2xl sm:text-3xl mb-2"></i><br>お気に入りのポッドキャストを追加
                         </div>
+                        
                         <div id="podcastPlayerArea" class="hidden space-y-4">
-                            <div class="flex items-center gap-4 bg-themeBg p-4 rounded-lg border border-gray-400/20 shadow-sm">
-                                <img id="podcastImage" src="" class="w-16 h-16 rounded object-cover bg-gray-400/20 flex-shrink-0">
+                            <div class="flex items-center gap-3 sm:gap-4 bg-themeBg p-3 sm:p-4 rounded-lg border border-gray-400/20 shadow-sm">
+                                <img id="podcastImage" src="" class="w-12 h-12 sm:w-16 sm:h-16 rounded object-cover bg-gray-400/20 flex-shrink-0">
                                 <div class="flex-1 overflow-hidden">
-                                    <div id="podcastTitle" class="font-bold text-sm truncate">番組名</div>
-                                    <div id="podcastDescription" class="text-xs opacity-60 line-clamp-2 mt-1">説明...</div>
+                                    <div id="podcastTitle" class="font-bold text-xs sm:text-sm truncate">番組名</div>
+                                    <div id="podcastDescription" class="text-[10px] sm:text-xs opacity-60 line-clamp-2 mt-1">説明...</div>
                                 </div>
                             </div>
-                            <div class="bg-themeBg p-4 rounded-lg border border-gray-400/20 space-y-3 shadow-sm">
-                                <div class="flex justify-between text-sm font-medium truncate" id="pc-episode-title">エピソードを選択してください</div>
-                                <div class="flex items-center gap-3 text-xs font-mono">
-                                    <span id="pc-current-time">00:00</span>
-                                    <input type="range" id="pc-seekbar" value="0" min="0" step="1" class="flex-1 cursor-pointer" onchange="seekPodcast()" disabled>
-                                    <span id="pc-duration">00:00</span>
-                                </div>
-                                <div class="flex justify-between items-center pt-2">
-                                    <div class="flex items-center gap-3">
-                                        <select id="pc-speed" class="bg-themeSecondary text-themeText text-xs p-1 rounded border border-gray-400/30 focus:outline-none" onchange="changePodcastSpeed()" disabled>
-                                            <option value="0.8">0.8x</option><option value="1.0" selected>1.0x</option><option value="1.2">1.2x</option><option value="1.5">1.5x</option><option value="2.0">2.0x</option>
-                                        </select>
-                                        <div class="flex items-center gap-1">
-                                            <i class="ph ph-speaker-high text-sm opacity-70"></i>
-                                            <input type="range" id="podcastVolume" value="1" min="0" max="1" step="0.05" class="w-16 cursor-pointer" oninput="changePodcastVolume()">
-                                        </div>
+
+                            <div class="bg-themeBg rounded-lg border border-gray-400/20 max-h-48 overflow-y-auto custom-scrollbar">
+                                <ul id="podcastEpisodeList" class="divide-y divide-gray-400/20 text-xs sm:text-sm"></ul>
+                            </div>
+                        </div>
+
+                        <!-- プレイヤー共通UI -->
+                        <div class="bg-themeBg p-3 sm:p-4 rounded-lg border border-gray-400/20 space-y-3 shadow-sm">
+                            <div class="text-xs sm:text-sm font-medium truncate" id="pc-episode-title">エピソードを選択してください</div>
+                            <div class="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs font-mono">
+                                <span id="pc-current-time">00:00</span>
+                                <input type="range" id="pc-seekbar" value="0" min="0" step="1" class="flex-1 cursor-pointer" onchange="seekPodcast()" disabled>
+                                <span id="pc-duration">00:00</span>
+                            </div>
+                            <div class="flex flex-wrap justify-between items-center pt-2 gap-y-3">
+                                <div class="flex items-center gap-1 sm:gap-3">
+                                    <select id="pc-speed" class="bg-themeSecondary text-themeText text-xs p-1 rounded border border-gray-400/30 focus:outline-none" onchange="changePodcastSpeed()" disabled>
+                                        <option value="0.8">0.8x</option><option value="1.0" selected>1.0x</option><option value="1.2">1.2x</option><option value="1.5">1.5x</option><option value="2.0">2.0x</option>
+                                    </select>
+                                    <div class="flex items-center gap-1">
+                                        <i class="ph ph-speaker-high text-xs sm:text-sm opacity-70"></i>
+                                        <input type="range" id="podcastVolume" value="1" min="0" max="1" step="0.05" class="w-12 sm:w-16 cursor-pointer" oninput="changePodcastVolume()">
                                     </div>
-                                    <div class="flex gap-4 items-center">
-                                        <button onclick="skipPodcast(-15)" class="hover:opacity-70 disabled:opacity-30 flex items-center justify-center" id="pc-btn-skip-back" disabled><i class="ph ph-rewind text-xl"></i></button>
-                                        <button onclick="togglePodcastPlay()" class="w-12 h-12 rounded-full bg-themePrimary text-white flex items-center justify-center hover:opacity-90 disabled:opacity-50 shadow-md" id="pc-btn-play" disabled><i class="ph ph-play text-xl" id="pc-play-icon"></i></button>
-                                        <button onclick="skipPodcast(15)" class="hover:opacity-70 disabled:opacity-30 flex items-center justify-center" id="pc-btn-skip-forward" disabled><i class="ph ph-fast-forward text-xl"></i></button>
-                                    </div>
+                                    <!-- プレイヤー右下の保存ボタン -->
+                                    <button id="pc-player-fav-btn" class="ml-1 p-1 rounded transition opacity-50 cursor-default" disabled onclick="toggleCurrentPodcastFav()" title="あとで聴くに保存">
+                                        <i class="ph ph-bookmark-simple text-base sm:text-lg" id="pc-player-fav-icon"></i>
+                                    </button>
+                                </div>
+                                <div class="flex gap-2 sm:gap-4 items-center mx-auto sm:mx-0">
+                                    <button onclick="skipPodcast(-15)" class="hover:opacity-70 disabled:opacity-30 flex items-center justify-center" id="pc-btn-skip-back" disabled><i class="ph ph-rewind text-lg sm:text-xl"></i></button>
+                                    <button onclick="togglePodcastPlay()" class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-themePrimary text-white flex items-center justify-center hover:opacity-90 disabled:opacity-50 shadow-md" id="pc-btn-play" disabled><i class="ph ph-play text-lg sm:text-xl" id="pc-play-icon"></i></button>
+                                    <button onclick="skipPodcast(15)" class="hover:opacity-70 disabled:opacity-30 flex items-center justify-center" id="pc-btn-skip-forward" disabled><i class="ph ph-fast-forward text-lg sm:text-xl"></i></button>
                                 </div>
                             </div>
-                            <div class="bg-themeBg rounded-lg border border-gray-400/20 max-h-64 overflow-y-auto">
-                                <ul id="podcastEpisodeList" class="divide-y divide-gray-400/20 text-sm"></ul>
+                        </div>
+                        <audio id="podcastAudio" class="hidden"></audio>
+
+                        <!-- あとで聴く リスト -->
+                        <div class="pt-4 border-t border-gray-400/20">
+                            <h3 class="text-xs sm:text-sm font-semibold mb-2 flex items-center gap-1"><i class="ph ph-bookmarks"></i> あとで聴く (最大30件)</h3>
+                            <div class="bg-themeBg rounded-lg border border-gray-400/20 max-h-48 overflow-y-auto custom-scrollbar">
+                                <ul id="podcastFavList" class="divide-y divide-gray-400/20 text-xs sm:text-sm">
+                                    <li class="p-4 text-center opacity-50 text-xs">エピソードがありません</li>
+                                </ul>
                             </div>
-                            <audio id="podcastAudio" class="hidden"></audio>
                         </div>
                     </div>
                 </div>
             </section>
 
             <section id="section-chart" data-id="chart" class="module-section bg-themeSecondary rounded-xl shadow-sm overflow-hidden flex flex-col">
-                <div class="px-6 py-4 section-header flex justify-between items-center bg-gray-400/5 hover:bg-gray-400/10 transition">
-                    <h2 class="text-lg font-semibold flex items-center gap-2 pointer-events-none">
+                <div class="px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-gray-400/5 hover:bg-gray-400/10 transition">
+                    <h2 class="text-lg font-semibold flex items-center gap-2 drag-handle-module px-2 py-1 -ml-2 rounded hover:bg-gray-400/20 select-none" title="ドラッグして並べ替え">
+                        <i class="ph ph-dots-six-vertical opacity-50"></i>
                         <i class="ph ph-chart-bar"></i> 学習記録 (直近7日間)
                     </h2>
-                    <button onclick="toggleSection('chart')" class="p-1 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
+                    <button onclick="toggleSection('chart')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
                         <i class="ph ph-caret-up" id="icon-toggle-chart"></i>
                     </button>
                 </div>
-                <div id="content-chart" class="px-6 pb-6 pt-2">
-                    <div class="bg-themeBg p-4 rounded-lg border border-gray-400/20">
+                <div id="content-chart" class="px-4 sm:px-6 pb-6 pt-2">
+                    <div class="bg-themeBg p-2 sm:p-4 rounded-lg border border-gray-400/20">
                         <canvas id="studyChart" height="200"></canvas>
                     </div>
                 </div>
@@ -567,12 +730,11 @@
 
     <!-- UI制御 & カスタムテーマ ロジック -->
     <script>
-        // カスタムテーマ関連ロジック
         const defaultCustomColors = { bg: '#f8fafc', text: '#334155', primary: '#475569', secondary: '#e2e8f0' };
 
         function openThemeModal() {
             document.getElementById('themeModal').classList.remove('hidden');
-            const saved = JSON.parse(localStorage.getItem('workflow_custom_colors')) || defaultCustomColors;
+            const saved = JSON.parse(localStorage.getItem('workside_custom_colors')) || defaultCustomColors;
             document.getElementById('color-bg').value = saved.bg;
             document.getElementById('color-text').value = saved.text;
             document.getElementById('color-primary').value = saved.primary;
@@ -620,7 +782,7 @@
                 primary: document.getElementById('color-primary').value,
                 secondary: document.getElementById('color-secondary').value
             };
-            localStorage.setItem('workflow_custom_colors', JSON.stringify(colors));
+            localStorage.setItem('workside_custom_colors', JSON.stringify(colors));
             setTheme('custom');
             closeThemeModal();
         }
@@ -637,7 +799,7 @@
             localStorage.setItem('app-theme', theme);
             
             if (theme === 'custom') {
-                const saved = JSON.parse(localStorage.getItem('workflow_custom_colors')) || defaultCustomColors;
+                const saved = JSON.parse(localStorage.getItem('workside_custom_colors')) || defaultCustomColors;
                 document.documentElement.style.setProperty('--bg-color', saved.bg);
                 document.documentElement.style.setProperty('--text-color', saved.text);
                 document.documentElement.style.setProperty('--primary-color', saved.primary);
@@ -648,10 +810,9 @@
             if(window.studyChartInstance) window.updateChart(); 
         }
 
-        // レイアウト管理
         document.addEventListener('DOMContentLoaded', () => {
             const container = document.getElementById('moduleContainer');
-            const savedLayout = localStorage.getItem('workflow_layout');
+            const savedLayout = localStorage.getItem('workside_layout');
             if (savedLayout) {
                 const layout = JSON.parse(savedLayout);
                 layout.forEach(item => {
@@ -665,7 +826,7 @@
                     }
                 });
             }
-            Sortable.create(container, { handle: '.section-header', animation: 150, onEnd: () => { saveLayoutState(); } });
+            Sortable.create(container, { handle: '.drag-handle-module', animation: 150, onEnd: () => { saveLayoutState(); } });
         });
 
         window.toggleSection = function(id) {
@@ -682,10 +843,9 @@
             const layout = sections.map(sec => ({
                 id: sec.id, minimized: document.getElementById('content-' + sec.dataset.id).classList.contains('hidden')
             }));
-            localStorage.setItem('workflow_layout', JSON.stringify(layout));
+            localStorage.setItem('workside_layout', JSON.stringify(layout));
         }
 
-        // 初期化実行
         setTheme(localStorage.getItem('app-theme') || 'light');
     </script>
 
@@ -699,9 +859,14 @@
             { id: 'other', name: 'その他', icon: 'ph-dots-three', color: '#6b7280' }
         ];
         
-        // 動的なタスク履歴の初期化
-        window.taskHistory = JSON.parse(localStorage.getItem('workflow_task_history')) || [];
+        window.taskHistory = JSON.parse(localStorage.getItem('workside_task_history')) || [];
+        window.podcastFavorites = [];
         
+        // 視聴済み管理と履歴管理
+        window.podcastFinished = JSON.parse(localStorage.getItem('workside_podcast_finished')) || {};
+        window.podcastHistory = JSON.parse(localStorage.getItem('workside_podcast_history')) || [];
+        window.currentPlayingPodcast = null;
+
         window.tasks = [];
         window.studyLogs = [];
         window.currentActiveCategoryId = 'other'; 
@@ -714,7 +879,7 @@
                 container.innerHTML += `
                     <div>
                         <input type="radio" name="category" id="cat_${cat.id}" value="${cat.id}" class="category-radio" ${checked}>
-                        <label for="cat_${cat.id}" class="flex items-center gap-1 px-4 py-2 rounded-full border border-gray-400/50 cursor-pointer hover:bg-gray-400/20 transition text-sm">
+                        <label for="cat_${cat.id}" class="flex items-center gap-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full border border-gray-400/50 cursor-pointer hover:bg-gray-400/20 transition text-[10px] sm:text-sm">
                             <i class="ph ${cat.icon}"></i> ${cat.name}
                         </label>
                     </div>
@@ -730,27 +895,28 @@
             const query = taskInput.value.toLowerCase();
             suggestList.innerHTML = '';
             
-            if (window.taskHistory.length === 0) {
+            const history = JSON.parse(localStorage.getItem('workside_task_history')) || [];
+            
+            if (history.length === 0) {
                 suggestList.classList.add('hidden');
                 return;
             }
 
             const matches = query.length === 0 
-                ? window.taskHistory.slice(0, 10)
-                : window.taskHistory.filter(task => task.title.toLowerCase().includes(query)).slice(0, 10);
+                ? history.slice(0, 10)
+                : history.filter(task => task.title.toLowerCase().includes(query)).slice(0, 10);
 
             if (matches.length > 0) {
                 suggestList.classList.remove('hidden');
                 matches.forEach(match => {
                     const li = document.createElement('li');
-                    li.className = 'hover:bg-gray-400/20 flex justify-between items-center text-sm p-0 m-0 border-b border-gray-400/10 last:border-0';
-                    
+                    li.className = 'hover:bg-gray-400/20 flex justify-between items-center text-xs sm:text-sm p-0 m-0 border-b border-gray-400/10 last:border-0';
                     const catName = categories.find(c => c.id === match.categoryId).name;
                     
                     // 文字列クリック部分 (タスク追加)
                     const contentDiv = document.createElement('div');
                     contentDiv.className = 'flex-1 truncate py-3 pl-4 cursor-pointer';
-                    contentDiv.innerHTML = `<span>${match.title}</span> <span class="text-xs opacity-60 ml-2">${catName}</span>`;
+                    contentDiv.innerHTML = `<span>${match.title}</span> <span class="text-[10px] sm:text-xs opacity-60 ml-2">${catName}</span>`;
                     contentDiv.onmousedown = (e) => {
                         e.preventDefault(); 
                         taskInput.value = match.title;
@@ -759,15 +925,14 @@
                         addTask(); 
                     };
 
-                    // 削除ボタン (×)
                     const deleteBtn = document.createElement('button');
                     deleteBtn.className = 'p-2 mr-2 my-1 hover:bg-red-500/20 rounded-full text-red-500 transition flex-shrink-0 flex items-center justify-center';
                     deleteBtn.innerHTML = '<i class="ph ph-x"></i>';
                     deleteBtn.onmousedown = (e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        window.taskHistory = window.taskHistory.filter(t => t.title !== match.title);
-                        localStorage.setItem('workflow_task_history', JSON.stringify(window.taskHistory));
+                        const newHistory = history.filter(t => t.title !== match.title);
+                        localStorage.setItem('workside_task_history', JSON.stringify(newHistory));
                         handleTaskInput(); 
                     };
 
@@ -801,18 +966,18 @@
                 
                 li.innerHTML = `
                     <div class="flex items-center gap-2 overflow-hidden flex-1 pl-1">
-                        <i class="ph ph-dots-six-vertical opacity-30 hover:opacity-100 cursor-grab text-xl task-drag-handle flex-shrink-0" title="ドラッグして並び替え"></i>
-                        <button onclick="toggleTaskCompletion('${task.id}', ${task.completed}); event.stopPropagation();" class="flex-shrink-0 w-6 h-6 rounded-full border-2 border-themePrimary flex items-center justify-center text-themeBg ${task.completed ? 'bg-themePrimary' : ''}">
-                            ${task.completed ? '<i class="ph ph-check text-sm font-bold"></i>' : ''}
+                        <i class="ph ph-dots-six-vertical opacity-30 hover:opacity-100 cursor-grab text-lg sm:text-xl task-drag-handle flex-shrink-0" title="ドラッグして並び替え"></i>
+                        <button onclick="toggleTaskCompletion('${task.id}', ${task.completed}); event.stopPropagation();" class="flex-shrink-0 w-5 h-5 sm:w-6 sm:h-6 rounded-full border-2 border-themePrimary flex items-center justify-center text-themeBg ${task.completed ? 'bg-themePrimary' : ''}">
+                            ${task.completed ? '<i class="ph ph-check text-xs sm:text-sm font-bold"></i>' : ''}
                         </button>
-                        <span class="truncate cursor-pointer flex-1 py-1 ${task.completed ? 'line-through' : ''}" onclick="setActiveTask('${task.title}', '${task.categoryId}')">${task.title}</span>
+                        <span class="truncate cursor-pointer flex-1 py-1 text-sm sm:text-base ${task.completed ? 'line-through' : ''}" onclick="setActiveTask('${task.title}', '${task.categoryId}')">${task.title}</span>
                     </div>
-                    <div class="flex items-center gap-2 pr-1">
-                        <div class="flex-shrink-0 text-xs px-2 py-1 rounded border border-gray-400/30 flex items-center gap-1">
+                    <div class="flex items-center gap-1 sm:gap-2 pr-1">
+                        <div class="flex-shrink-0 text-[10px] sm:text-xs px-1 sm:px-2 py-0.5 sm:py-1 rounded border border-gray-400/30 flex items-center gap-1">
                             <i class="ph ${cat.icon}"></i> <span class="hidden sm:inline">${cat.name}</span>
                         </div>
                         <button onclick="deleteTask('${task.id}'); event.stopPropagation();" class="text-red-500 hover:bg-red-500/20 p-1 rounded transition opacity-0 group-hover:opacity-100" title="削除">
-                            <i class="ph ph-trash text-lg"></i>
+                            <i class="ph ph-trash text-base sm:text-lg"></i>
                         </button>
                     </div>
                 `;
@@ -851,16 +1016,16 @@
         }
         function updateTimerDisplay() {
             document.getElementById('timerDisplay').textContent = formatTime(timeLeft);
-            document.title = `${formatTime(timeLeft)} - Workflow`;
+            document.title = `${formatTime(timeLeft)} - Workside`;
         }
         function toggleTimer() {
             const icon = document.getElementById('playPauseIcon');
             if (isRunning) {
                 clearInterval(timerInterval);
-                icon.className = "ph ph-play text-2xl";
+                icon.className = "ph ph-play text-2xl sm:text-3xl";
                 isRunning = false;
             } else {
-                icon.className = "ph ph-pause text-2xl";
+                icon.className = "ph ph-pause text-2xl sm:text-3xl";
                 isRunning = true;
                 timerInterval = setInterval(() => {
                     if (timeLeft > 0) { 
@@ -869,7 +1034,7 @@
                     } else { 
                         clearInterval(timerInterval); 
                         isRunning = false; 
-                        icon.className = "ph ph-play text-2xl"; 
+                        icon.className = "ph ph-play text-2xl sm:text-3xl"; 
                         if (window.saveStudyLog) window.saveStudyLog(25, window.currentActiveCategoryId);
                         alert("25分経過！学習を記録しました。"); 
                         resetTimer(); 
@@ -880,7 +1045,7 @@
         function resetTimer() {
             clearInterval(timerInterval);
             isRunning = false;
-            document.getElementById('playPauseIcon').className = "ph ph-play text-2xl";
+            document.getElementById('playPauseIcon').className = "ph ph-play text-2xl sm:text-3xl";
             timeLeft = 25 * 60;
             updateTimerDisplay();
             document.title = "学習・タスク管理ツール";
@@ -983,7 +1148,7 @@
         const playModeIcons = ['ph-arrow-right', 'ph-repeat', 'ph-repeat-once', 'ph-shuffle'];
         const playModeTitles = ['ノーマル再生', '全曲ループ', '1曲ループ', 'シャッフル'];
 
-        localforage.config({ name: 'WorkflowAudioApp', storeName: 'playlists' });
+        localforage.config({ name: 'WorksideAudioApp', storeName: 'playlists' });
 
         async function initLocalAudio() {
             const savedData = await localforage.getItem('user_playlists');
@@ -1067,10 +1232,10 @@
             }
             tracks.forEach((track, index) => {
                 const li = document.createElement('li');
-                li.className = `p-3 flex justify-between items-center group cursor-pointer hover:bg-gray-400/10 ${index === currentTrackIndex ? 'bg-themePrimary/10 text-themePrimary font-medium' : ''}`;
+                li.className = `p-2 sm:p-3 flex justify-between items-center group cursor-pointer hover:bg-gray-400/10 ${index === currentTrackIndex ? 'bg-themePrimary/10 text-themePrimary font-medium' : ''}`;
                 li.innerHTML = `
                     <div class="flex items-center gap-2 overflow-hidden flex-1" onclick="loadTrack(${index}); toggleAudio(true);">
-                        <i class="ph ph-list drag-handle cursor-grab opacity-30 hover:opacity-100"></i>
+                        <i class="ph ph-list drag-handle cursor-grab opacity-30 hover:opacity-100 text-lg"></i>
                         <span class="truncate">${track.name}</span>
                     </div>
                     <button onclick="removeTrack(${index})" class="opacity-0 group-hover:opacity-100 text-red-500 hover:bg-red-500/20 p-1 rounded transition"><i class="ph ph-x"></i></button>
@@ -1165,7 +1330,7 @@
             playMode = (playMode + 1) % 4;
             const btn = document.getElementById('btnPlayMode');
             const icon = document.getElementById('playModeIcon');
-            icon.className = `ph ${playModeIcons[playMode]} text-lg`;
+            icon.className = `ph ${playModeIcons[playMode]} text-lg sm:text-xl`;
             btn.title = playModeTitles[playMode];
             if (playMode === 0) btn.classList.remove('bg-themePrimary/20', 'text-themePrimary');
             else btn.classList.add('bg-themePrimary/20', 'text-themePrimary');
@@ -1263,14 +1428,14 @@
 
         function checkAndInitPlayer() {
             if (window.spotifySDKReady && spotifyToken && !spotifyPlayer) {
-                spotifyPlayer = new Spotify.Player({ name: 'Workflow Web Player', getOAuthToken: cb => { cb(spotifyToken); }, volume: 0.5 });
+                spotifyPlayer = new Spotify.Player({ name: 'Workside Web Player', getOAuthToken: cb => { cb(spotifyToken); }, volume: 0.5 });
                 spotifyPlayer.addListener('player_state_changed', state => {
                     if (!state) return;
                     document.getElementById('sp-track-name').textContent = state.track_window.current_track.name;
                     document.getElementById('sp-artist-name').textContent = state.track_window.current_track.artists[0].name;
                     document.getElementById('sp-play-icon').className = state.paused ? "ph ph-play text-xl" : "ph ph-pause text-xl";
                 });
-                spotifyPlayer.addListener('ready', ({ device_id }) => { document.getElementById('sp-device-status').textContent = "接続完了: スマホ等から「Workflow Web Player」を選択してください"; });
+                spotifyPlayer.addListener('ready', ({ device_id }) => { document.getElementById('sp-device-status').textContent = "接続完了: スマホ等から「Workside Web Player」を選択してください"; });
                 spotifyPlayer.addListener('initialization_error', ({ message }) => console.error(message));
                 spotifyPlayer.addListener('authentication_error', ({ message }) => {
                     document.getElementById('sp-device-status').textContent = "認証エラー: 再ログインしてください";
@@ -1294,10 +1459,211 @@
         const pcCurrentTime = document.getElementById('pc-current-time');
         const pcDuration = document.getElementById('pc-duration');
         let currentPodcastEpisodes = [];
+        let currentPodcastTitle = "";
+
+        // プレイヤー右下の保存ボタンのアイコン・状態を更新する関数
+        window.updatePlayerFavBtn = function() {
+            const btn = document.getElementById('pc-player-fav-btn');
+            const icon = document.getElementById('pc-player-fav-icon');
+            if (!window.currentPlayingPodcast) {
+                btn.disabled = true;
+                btn.classList.add('opacity-50', 'cursor-default');
+                btn.classList.remove('hover:bg-gray-400/20', 'text-themePrimary');
+                icon.className = "ph ph-bookmark-simple text-base sm:text-lg";
+                return;
+            }
+            btn.disabled = false;
+            btn.classList.remove('opacity-50', 'cursor-default');
+            
+            const isFav = window.podcastFavorites.some(f => f.link === window.currentPlayingPodcast.link);
+            if (isFav) {
+                btn.classList.add('text-themePrimary');
+                btn.classList.remove('text-themeText', 'hover:bg-gray-400/20');
+                icon.className = "ph-fill ph-bookmark-simple text-base sm:text-lg";
+            } else {
+                btn.classList.remove('text-themePrimary');
+                btn.classList.add('text-themeText', 'hover:bg-gray-400/20');
+                icon.className = "ph ph-bookmark-simple text-base sm:text-lg";
+            }
+        };
+
+        window.toggleCurrentPodcastFav = function() {
+            if (!window.currentPlayingPodcast) return;
+            const p = window.currentPlayingPodcast;
+            window.togglePodcastFavorite(p.title, p.link, p.podcastTitle, p.pubDate);
+        };
+
+        // 履歴モーダル制御
+        window.openPodcastHistoryModal = function() {
+            document.getElementById('podcastHistoryModal').classList.remove('hidden');
+            window.renderPodcastHistoryList();
+        };
+
+        window.closePodcastHistoryModal = function() {
+            document.getElementById('podcastHistoryModal').classList.add('hidden');
+        };
+
+        window.renderPodcastHistoryList = function() {
+            const listEl = document.getElementById('podcastHistoryList');
+            listEl.innerHTML = '';
+            
+            if (window.podcastHistory.length === 0) {
+                listEl.innerHTML = '<li class="p-4 text-center opacity-50 text-xs">履歴がありません</li>';
+                return;
+            }
+
+            window.podcastHistory.forEach((item) => {
+                const li = document.createElement('li');
+                li.className = 'p-3 hover:bg-gray-400/10 cursor-pointer flex flex-col gap-1 transition';
+                
+                const timeStr = formatPodcastTime(item.currentTime || 0);
+                const isFinished = window.podcastFinished[item.link];
+                
+                li.innerHTML = `
+                    <div class="font-medium text-xs sm:text-sm line-clamp-1 ${isFinished ? 'opacity-50' : ''}">${item.title}</div>
+                    <div class="text-[10px] opacity-60 line-clamp-1 flex justify-between">
+                        <span class="truncate mr-2">${item.podcastTitle} • ${item.pubDate}</span>
+                        <span class="text-themePrimary font-mono font-medium flex-shrink-0">${isFinished ? '視聴済み' : timeStr + ' まで'}</span>
+                    </div>
+                `;
+                li.onclick = () => {
+                    window.closePodcastHistoryModal();
+                    playSavedPodcastEpisode(item.title, item.link, item.podcastTitle, item.pubDate);
+                };
+                listEl.appendChild(li);
+            });
+        };
+
+        window.renderPodcastFavorites = function() {
+            const listEl = document.getElementById('podcastFavList');
+            listEl.innerHTML = '';
+            
+            if (window.podcastFavorites.length === 0) {
+                listEl.innerHTML = '<li class="p-4 text-center opacity-50 text-xs">エピソードがありません</li>';
+                return;
+            }
+
+            window.podcastFavorites.forEach((fav) => {
+                const isFinished = window.podcastFinished[fav.link];
+                const li = document.createElement('li');
+                li.className = `p-3 hover:bg-gray-400/10 cursor-pointer flex justify-between items-center group transition border-b border-gray-400/10 last:border-0 ${isFinished ? 'opacity-50 bg-gray-400/5' : ''}`;
+                
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'flex-1 overflow-hidden pr-2';
+                contentDiv.innerHTML = `
+                    <div class="font-medium text-xs sm:text-sm line-clamp-1">${fav.title}</div>
+                    <div class="text-[10px] opacity-60 line-clamp-1">${fav.podcastTitle} • ${fav.pubDate} ${isFinished ? '• 視聴済み' : ''}</div>
+                `;
+                contentDiv.onclick = () => playSavedPodcastEpisode(fav.title, fav.link, fav.podcastTitle, fav.pubDate);
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'opacity-0 group-hover:opacity-100 p-2 text-red-500 hover:bg-red-500/20 rounded transition flex-shrink-0';
+                deleteBtn.innerHTML = '<i class="ph ph-trash text-base sm:text-lg"></i>';
+                deleteBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    window.removePodcastFavorite(fav.id);
+                };
+
+                li.appendChild(contentDiv);
+                li.appendChild(deleteBtn);
+                listEl.appendChild(li);
+            });
+        };
+
+        window.renderPodcastEpisodeList = function() {
+            const listEl = document.getElementById('podcastEpisodeList');
+            listEl.innerHTML = '';
+
+            if (currentPodcastEpisodes.length === 0) {
+                listEl.innerHTML = '<li class="p-4 text-center opacity-50">再生可能なエピソードが見つかりません</li>';
+            } else {
+                currentPodcastEpisodes.forEach((ep, index) => {
+                    const isFav = window.podcastFavorites.some(f => f.link === ep.enclosure.link);
+                    const isFinished = window.podcastFinished[ep.enclosure.link];
+                    
+                    const li = document.createElement('li');
+                    li.className = `p-3 hover:bg-gray-400/10 cursor-pointer flex justify-between items-center group transition border-b border-gray-400/10 last:border-0 ${isFinished ? 'opacity-50 bg-gray-400/5' : ''}`;
+                    const pubDate = new Date(ep.pubDate).toLocaleDateString('ja-JP');
+                    
+                    const textDiv = document.createElement('div');
+                    textDiv.className = 'flex-1 overflow-hidden pr-2';
+                    textDiv.innerHTML = `<div class="font-medium text-xs sm:text-sm line-clamp-1">${ep.title}</div><div class="text-[10px] opacity-60">${pubDate} ${isFinished ? '• 視聴済み' : ''}</div>`;
+                    textDiv.onclick = () => playPodcastEpisode(index);
+
+                    const addBtn = document.createElement('button');
+                    addBtn.className = `p-2 rounded transition flex-shrink-0 ${isFav ? 'text-themePrimary opacity-100' : 'text-themeText opacity-0 group-hover:opacity-100 hover:bg-gray-400/20'}`;
+                    addBtn.innerHTML = `<i class="${isFav ? 'ph-fill ph-bookmark-simple' : 'ph ph-bookmark-simple'} text-base sm:text-lg"></i>`;
+                    addBtn.title = isFav ? 'あとで聴くから削除' : 'あとで聴くに保存';
+                    addBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        window.togglePodcastFavorite(ep.title, ep.enclosure.link, currentPodcastTitle, pubDate);
+                    };
+
+                    li.appendChild(textDiv);
+                    li.appendChild(addBtn);
+                    listEl.appendChild(li);
+                });
+            }
+        };
+
+        window.markPodcastAsFinished = function(link) {
+            window.podcastFinished[link] = true;
+            localStorage.setItem('workside_podcast_finished', JSON.stringify(window.podcastFinished));
+            window.renderPodcastEpisodeList();
+            window.renderPodcastFavorites();
+            if(document.getElementById('podcastHistoryModal').classList.contains('hidden') === false) {
+                window.renderPodcastHistoryList();
+            }
+        };
+
+        window.savePodcastHistoryTime = function(time) {
+            if(!window.currentPlayingPodcast) return;
+            const link = window.currentPlayingPodcast.link;
+            const index = window.podcastHistory.findIndex(h => h.link === link);
+            
+            if (index !== -1) {
+                window.podcastHistory[index].currentTime = time;
+                window.podcastHistory[index].lastPlayedAt = Date.now();
+                // 順序を一番上に持ってくる
+                const updatedItem = window.podcastHistory.splice(index, 1)[0];
+                window.podcastHistory.unshift(updatedItem);
+            } else {
+                window.podcastHistory.unshift({
+                    ...window.currentPlayingPodcast,
+                    currentTime: time,
+                    lastPlayedAt: Date.now()
+                });
+                if(window.podcastHistory.length > 30) window.podcastHistory.pop();
+            }
+            localStorage.setItem('workside_podcast_history', JSON.stringify(window.podcastHistory));
+        };
 
         async function loadPodcast() {
-            const urlInput = document.getElementById('podcastRssInput').value.trim();
-            if (!urlInput) return alert('RSSフィードのURLを入力してください');
+            let urlInput = document.getElementById('podcastRssInput').value.trim();
+            if (!urlInput) return alert('URLを入力してください');
+            
+            try {
+                if (urlInput.includes('podcasts.apple.com')) {
+                    const idMatch = urlInput.match(/id(\d+)/);
+                    if (idMatch) {
+                        const lookupRes = await fetch(`https://itunes.apple.com/lookup?id=${idMatch[1]}&entity=podcast`);
+                        const lookupData = await lookupRes.json();
+                        if (lookupData.results && lookupData.results.length > 0) {
+                            urlInput = lookupData.results[0].feedUrl;
+                        } else {
+                            throw new Error('Apple PodcastsからRSSが見つかりませんでした');
+                        }
+                    }
+                }
+                else if (urlInput.includes('anchor.fm/') && !urlInput.endsWith('/rss')) {
+                    let base = urlInput.split('?')[0].split('/episodes/')[0];
+                    if (!base.endsWith('/')) base += '/';
+                    urlInput = base + 'podcast/rss';
+                }
+            } catch (e) {
+                console.warn("URL変換エラー:", e);
+            }
+            
             document.getElementById('podcastPlaceholder').classList.add('hidden');
             document.getElementById('podcastPlayerArea').classList.add('hidden');
             document.getElementById('podcastLoading').classList.remove('hidden');
@@ -1307,26 +1673,15 @@
                 const data = await response.json();
                 if (data.status !== 'ok') throw new Error('RSSの読み込みに失敗しました');
 
-                document.getElementById('podcastTitle').textContent = data.feed.title;
+                currentPodcastTitle = data.feed.title || "不明な番組";
+                document.getElementById('podcastTitle').textContent = currentPodcastTitle;
                 document.getElementById('podcastDescription').textContent = data.feed.description || '説明がありません';
                 document.getElementById('podcastImage').src = data.feed.image || '';
 
                 currentPodcastEpisodes = data.items.filter(item => item.enclosure && item.enclosure.link);
-                const listEl = document.getElementById('podcastEpisodeList');
-                listEl.innerHTML = '';
+                
+                window.renderPodcastEpisodeList();
 
-                if (currentPodcastEpisodes.length === 0) {
-                    listEl.innerHTML = '<li class="p-4 text-center opacity-50">再生可能なエピソードが見つかりません</li>';
-                } else {
-                    currentPodcastEpisodes.forEach((ep, index) => {
-                        const li = document.createElement('li');
-                        li.className = 'p-3 hover:bg-gray-400/10 cursor-pointer flex flex-col gap-1 transition';
-                        const pubDate = new Date(ep.pubDate).toLocaleDateString('ja-JP');
-                        li.innerHTML = `<div class="font-medium line-clamp-1">${ep.title}</div><div class="text-[10px] opacity-60">${pubDate}</div>`;
-                        li.onclick = () => playPodcastEpisode(index);
-                        listEl.appendChild(li);
-                    });
-                }
                 document.getElementById('podcastLoading').classList.add('hidden');
                 document.getElementById('podcastPlayerArea').classList.remove('hidden');
             } catch (error) {
@@ -1339,9 +1694,29 @@
         function playPodcastEpisode(index) {
             const ep = currentPodcastEpisodes[index];
             if (!ep || !ep.enclosure || !ep.enclosure.link) return;
+            const pubDate = new Date(ep.pubDate).toLocaleDateString('ja-JP');
+            playSavedPodcastEpisode(ep.title, ep.enclosure.link, currentPodcastTitle, pubDate);
+        }
+
+        function playSavedPodcastEpisode(title, link, podcastTitle, pubDate) {
             if (audioPlayer && !audioPlayer.paused) toggleAudio(false);
-            podcastAudio.src = ep.enclosure.link;
-            document.getElementById('pc-episode-title').textContent = ep.title;
+            podcastAudio.src = link;
+            document.getElementById('pc-episode-title').textContent = title;
+            
+            window.currentPlayingPodcast = { title, link, podcastTitle, pubDate };
+            
+            // 履歴から再生時間を復元
+            let existing = window.podcastHistory.find(h => h.link === link);
+            if (existing && existing.currentTime) {
+                // Chromeなどの一部ブラウザではloadedmetadataを待つ必要があるため、イベントリスナー内で設定
+                podcastAudio.dataset.resumeTime = existing.currentTime;
+            } else {
+                delete podcastAudio.dataset.resumeTime;
+                window.savePodcastHistoryTime(0);
+            }
+            
+            window.updatePlayerFavBtn();
+            
             pcSeekbar.disabled = false;
             document.getElementById('pc-speed').disabled = false;
             document.getElementById('pc-btn-skip-back').disabled = false;
@@ -1365,14 +1740,39 @@
             pcSeekbar.max = Math.floor(podcastAudio.duration);
             pcDuration.textContent = formatPodcastTime(podcastAudio.duration);
             podcastAudio.playbackRate = parseFloat(document.getElementById('pc-speed').value);
+            
+            // 履歴の時間を適用して再開
+            if (podcastAudio.dataset.resumeTime) {
+                podcastAudio.currentTime = parseFloat(podcastAudio.dataset.resumeTime);
+                delete podcastAudio.dataset.resumeTime;
+            }
         });
+        
+        let podcastSaveInterval = 0;
         podcastAudio.addEventListener('timeupdate', () => {
             if (!podcastAudio.paused) {
                 pcSeekbar.value = Math.floor(podcastAudio.currentTime);
                 pcCurrentTime.textContent = formatPodcastTime(podcastAudio.currentTime);
+                
+                // 5秒ごとに再生位置を履歴として保存
+                const now = Date.now();
+                if (now - podcastSaveInterval > 5000) {
+                    window.savePodcastHistoryTime(podcastAudio.currentTime);
+                    podcastSaveInterval = now;
+                }
             }
         });
-        podcastAudio.addEventListener('ended', () => { pcPlayIcon.className = "ph ph-play text-xl"; });
+        
+        podcastAudio.addEventListener('pause', () => {
+            window.savePodcastHistoryTime(podcastAudio.currentTime);
+        });
+        
+        podcastAudio.addEventListener('ended', () => { 
+            pcPlayIcon.className = "ph ph-play text-xl"; 
+            if (window.currentPlayingPodcast) {
+                window.markPodcastAsFinished(window.currentPlayingPodcast.link);
+            }
+        });
 
         function formatPodcastTime(seconds) {
             if (isNaN(seconds)) return "00:00";
