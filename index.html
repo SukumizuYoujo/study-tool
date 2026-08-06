@@ -43,7 +43,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, query, where, writeBatch } 
+        import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, query, where, writeBatch, getDoc, setDoc } 
             from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
         import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } 
             from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
@@ -67,7 +67,13 @@
         const podcastFavRef = collection(db, "podcastFavorites");
 
         window.db = db;
+        window.writeBatch = writeBatch;
+        window.doc = doc;
+        window.getDoc = getDoc;
+        window.setDoc = setDoc;
         window.currentUser = null;
+        window.hasRunCatchup = false;
+        
         let unsubscribeTasks = null;
         let unsubscribeLogs = null;
         let unsubscribePodcastFavs = null;
@@ -88,12 +94,31 @@
                 await migrateLocalTasksToCloud(user.uid);
                 await migrateLocalLogsToCloud(user.uid);
                 await migrateLocalPodcastFavsToCloud(user.uid);
+
+                try {
+                    const statsDoc = await window.getDoc(window.doc(window.db, "userStats", user.uid));
+                    if (statsDoc.exists()) {
+                        const remoteStats = statsDoc.data();
+                        let localStats = JSON.parse(localStorage.getItem('workside_stats')) || { heatmap: {}, lastProcessed: '' };
+                        if (remoteStats.lastProcessed && remoteStats.lastProcessed > localStats.lastProcessed) {
+                            localStats.lastProcessed = remoteStats.lastProcessed;
+                        }
+                        localStats.heatmap = { ...localStats.heatmap, ...(remoteStats.heatmap || {}) };
+                        localStorage.setItem('workside_stats', JSON.stringify(localStats));
+                    }
+                } catch(e) { console.error("Stats Sync Error:", e); }
                 
                 const qTasks = query(tasksRef, where("userId", "==", user.uid));
-                unsubscribeTasks = onSnapshot(qTasks, (snapshot) => {
+                unsubscribeTasks = onSnapshot(qTasks, async (snapshot) => {
                     window.tasks = []; 
                     snapshot.forEach((doc) => { window.tasks.push({ id: doc.id, ...doc.data() }); });
-                    if (typeof window.renderTasks === "function") window.renderTasks(); 
+                    
+                    if (!window.hasRunCatchup) {
+                        window.hasRunCatchup = true;
+                        await window.runCatchupProcess();
+                    } else {
+                        if (typeof window.renderTasks === "function") window.renderTasks(); 
+                    }
                 });
 
                 const qLogs = query(logsRef, where("userId", "==", user.uid));
@@ -126,6 +151,11 @@
                 loadLocalTasks();
                 loadLocalLogs();
                 loadLocalPodcastFavs();
+
+                if (!window.hasRunCatchup) {
+                    window.hasRunCatchup = true;
+                    window.runCatchupProcess();
+                }
             }
         });
 
@@ -146,7 +176,7 @@
             localTasks.forEach(task => {
                 const newDocRef = doc(tasksRef);
                 batch.set(newDocRef, { 
-                    title: task.title, categoryId: task.categoryId, completed: task.completed, 
+                    title: task.title, dueDate: task.dueDate || null, categoryId: task.categoryId, completed: task.completed, 
                     createdAt: new Date(), userId: uid, order: task.order || Date.now() 
                 });
             });
@@ -157,6 +187,11 @@
         window.addTask = async function() {
             const taskInput = document.getElementById('taskInput');
             const title = taskInput.value.trim();
+            
+            // 【修正部分】データ属性 (dataset.date) から期限を取得するよう修正
+            const dueDateDisplay = document.getElementById('selectedDueDateText');
+            const dueDate = dueDateDisplay.dataset.date || null;
+            
             if(!title) return;
             
             const selectedCatId = document.querySelector('input[name="category"]:checked').value;
@@ -168,13 +203,16 @@
             localStorage.setItem('workside_task_history', JSON.stringify(window.taskHistory));
             
             if (window.currentUser) {
-                await addDoc(tasksRef, { title: title, categoryId: selectedCatId, completed: false, createdAt: new Date(), userId: window.currentUser.uid, order: newOrder });
+                await addDoc(tasksRef, { title: title, dueDate: dueDate, categoryId: selectedCatId, completed: false, createdAt: new Date(), userId: window.currentUser.uid, order: newOrder });
             } else {
-                window.tasks.push({ id: Date.now().toString(), title: title, categoryId: selectedCatId, completed: false, order: newOrder });
+                window.tasks.push({ id: Date.now().toString(), title: title, dueDate: dueDate, categoryId: selectedCatId, completed: false, order: newOrder });
                 window.saveLocalTasks();
                 window.renderTasks();
             }
             taskInput.value = '';
+            
+            // タスク追加後はカレンダーの表示とデータ(dataset)をリセットする
+            window.clearDatePicker();
             document.getElementById('suggestList').classList.add('hidden');
         };
 
@@ -285,7 +323,6 @@
             const existingFav = window.podcastFavorites.find(f => f.link === epLink);
             
             if (existingFav) {
-                // 削除
                 if (window.currentUser) {
                     await deleteDoc(doc(db, "podcastFavorites", existingFav.id));
                 } else {
@@ -296,7 +333,6 @@
                     window.updatePlayerFavBtn();
                 }
             } else {
-                // 追加
                 if (window.podcastFavorites.length >= 30) {
                     alert("「あとで聴く」は最大30件まで保存可能です。古いものを削除してください。");
                     return;
@@ -331,7 +367,6 @@
             }
         };
 
-        // 再生終了時にリストから自動削除する関数
         window.removePodcastFavoriteByLink = async function(link) {
             const existingFav = window.podcastFavorites.find(f => f.link === link);
             if (existingFav) {
@@ -345,7 +380,6 @@
                 }
             }
         };
-
     </script>
 
     <script src="https://sdk.scdn.co/spotify-player.js"></script>
@@ -370,7 +404,6 @@
             transition: background-color 0.3s, color 0.3s;
         }
 
-        /* カテゴリのラジオボタン（スマホでの見栄えを考慮し、paddingとフォントサイズを微調整） */
         input[type="radio"].category-radio { display: none; }
         input[type="radio"].category-radio:checked + label {
             background-color: var(--primary-color);
@@ -380,16 +413,10 @@
         
         .task-item.sortable-ghost { opacity: 0.5; background-color: var(--primary-color); }
         .module-section.sortable-ghost { opacity: 0.4; }
-        
-        /* 
-         * スマホでスクロールしやすくするため、ヘッダー全体ではなく
-         * 左上のタイトル部分のみをドラッグ可能（グリップ）に変更 
-         */
         .drag-handle-module { cursor: grab; }
         .drag-handle-module:active { cursor: grabbing; }
         
         input[type="range"] { accent-color: var(--primary-color); }
-
         input[type="color"] {
             appearance: none;
             border: none;
@@ -405,9 +432,137 @@
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(156, 163, 175, 0.3); border-radius: 20px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: rgba(156, 163, 175, 0.5); }
+
+        .custom-scrollbar-x::-webkit-scrollbar { height: 6px; }
+        .custom-scrollbar-x::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar-x::-webkit-scrollbar-thumb { background-color: rgba(156, 163, 175, 0.3); border-radius: 20px; }
+        .custom-scrollbar-x::-webkit-scrollbar-thumb:hover { background-color: rgba(156, 163, 175, 0.5); }
     </style>
 </head>
 <body class="min-h-screen p-4 md:p-8 font-sans relative">
+
+    <!-- タイマー設定モーダル -->
+    <div id="timerSettingsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity p-4">
+        <div class="bg-themeBg text-themeText p-6 rounded-xl shadow-xl max-w-sm w-full border border-gray-400/20 max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-lg font-bold flex items-center gap-2"><i class="ph ph-timer"></i> タイマー設定</h3>
+                <button onclick="closeTimerSettings()" class="text-xl opacity-60 hover:opacity-100 transition"><i class="ph ph-x"></i></button>
+            </div>
+            
+            <div class="space-y-5">
+                <div class="space-y-3">
+                    <h4 class="text-sm font-semibold opacity-80 border-b border-gray-400/20 pb-1">時間設定</h4>
+                    <div class="flex justify-between items-center">
+                        <label class="text-sm font-medium">集中時間 (分)</label>
+                        <input type="number" id="settingFocusTime" min="5" max="90" step="5" class="w-16 p-1 bg-themeSecondary border border-gray-400/30 rounded text-center focus:outline-none focus:ring-1 focus:ring-themePrimary" onchange="saveTimerSettings()">
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <label class="text-sm font-medium">休憩時間 (分)</label>
+                        <input type="number" id="settingBreakTime" min="1" max="30" step="1" class="w-16 p-1 bg-themeSecondary border border-gray-400/30 rounded text-center focus:outline-none focus:ring-1 focus:ring-themePrimary" onchange="saveTimerSettings()">
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <h4 class="text-sm font-semibold opacity-80 border-b border-gray-400/20 pb-1">自動開始</h4>
+                    <div class="flex justify-between items-center">
+                        <label class="text-sm font-medium">自動で休憩を開始</label>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="settingAutoBreak" class="sr-only peer" onchange="saveTimerSettings()">
+                            <div class="w-9 h-5 bg-gray-400/30 rounded-full peer peer-checked:bg-themePrimary transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                        </label>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <label class="text-sm font-medium">自動で集中を開始</label>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="settingAutoFocus" class="sr-only peer" onchange="saveTimerSettings()">
+                            <div class="w-9 h-5 bg-gray-400/30 rounded-full peer peer-checked:bg-themePrimary transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <h4 class="text-sm font-semibold opacity-80 border-b border-gray-400/20 pb-1">終了アラーム</h4>
+                    <div class="flex justify-between items-center">
+                        <label class="text-sm font-medium">サウンド</label>
+                        <select id="settingAlarmSound" class="p-1 text-sm bg-themeSecondary border border-gray-400/30 rounded focus:outline-none" onchange="saveTimerSettings(); previewAlarm();">
+                            <option value="alarm1">アラーム1</option>
+                            <option value="alarm2">アラーム2</option>
+                            <option value="alarm3">アラーム3</option>
+                            <option value="custom">カスタム</option>
+                        </select>
+                    </div>
+                    <div id="customAlarmWrapper" class="hidden flex gap-2 items-center mb-2 mt-2">
+                        <label class="flex-1 cursor-pointer p-1.5 rounded bg-themeSecondary border border-gray-400/30 text-xs text-center truncate hover:bg-gray-400/10 transition" id="customAlarmFileLabel">
+                            ファイルを選択...
+                            <input type="file" accept="audio/*" class="hidden" onchange="handleCustomAlarmFile(event)">
+                        </label>
+                        <button onclick="clearCustomAlarm()" class="px-2 py-1.5 border border-red-500/50 text-red-500 rounded text-xs transition shadow-sm hover:bg-red-500/10" title="クリア"><i class="ph ph-trash"></i></button>
+                    </div>
+                    <div class="flex justify-between items-center">
+                        <label class="text-sm font-medium">音量</label>
+                        <input type="range" id="settingAlarmVol" min="0" max="1" step="0.05" class="w-24 cursor-pointer" oninput="saveTimerSettings()" onchange="previewAlarm()">
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <h4 class="text-sm font-semibold opacity-80 border-b border-gray-400/20 pb-1">フォント設定</h4>
+                    <div class="space-y-2">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" name="fontSelect" value="0" id="fontSelect_0" onchange="changeActiveFont(0)" class="text-themePrimary focus:ring-themePrimary">
+                            <span class="text-sm font-medium">デフォルト</span>
+                        </label>
+                        <div class="flex items-center gap-2 pl-6">
+                            <input type="radio" name="fontSelect" value="1" id="fontSelect_1" onchange="changeActiveFont(1)" class="text-themePrimary focus:ring-themePrimary">
+                            <label class="flex-1 cursor-pointer p-1.5 rounded bg-themeSecondary border border-gray-400/30 text-xs text-center truncate hover:bg-gray-400/10 transition" id="customFontLabel_0">
+                                フォント1を選択...
+                                <input type="file" accept=".ttf,.otf,.woff,.woff2" class="hidden" onchange="handleCustomFontFile(event, 0)">
+                            </label>
+                            <button onclick="clearCustomFont(0)" class="px-2 py-1 border border-red-500/50 text-red-500 rounded text-xs transition shadow-sm hover:bg-red-500/10" title="クリア"><i class="ph ph-trash"></i></button>
+                        </div>
+                        <div class="flex items-center gap-2 pl-6">
+                            <input type="radio" name="fontSelect" value="2" id="fontSelect_2" onchange="changeActiveFont(2)" class="text-themePrimary focus:ring-themePrimary">
+                            <label class="flex-1 cursor-pointer p-1.5 rounded bg-themeSecondary border border-gray-400/30 text-xs text-center truncate hover:bg-gray-400/10 transition" id="customFontLabel_1">
+                                フォント2を選択...
+                                <input type="file" accept=".ttf,.otf,.woff,.woff2" class="hidden" onchange="handleCustomFontFile(event, 1)">
+                            </label>
+                            <button onclick="clearCustomFont(1)" class="px-2 py-1 border border-red-500/50 text-red-500 rounded text-xs transition shadow-sm hover:bg-red-500/10" title="クリア"><i class="ph ph-trash"></i></button>
+                        </div>
+                        <div class="flex items-center gap-2 pl-6">
+                            <input type="radio" name="fontSelect" value="3" id="fontSelect_3" onchange="changeActiveFont(3)" class="text-themePrimary focus:ring-themePrimary">
+                            <label class="flex-1 cursor-pointer p-1.5 rounded bg-themeSecondary border border-gray-400/30 text-xs text-center truncate hover:bg-gray-400/10 transition" id="customFontLabel_2">
+                                フォント3を選択...
+                                <input type="file" accept=".ttf,.otf,.woff,.woff2" class="hidden" onchange="handleCustomFontFile(event, 2)">
+                            </label>
+                            <button onclick="clearCustomFont(2)" class="px-2 py-1 border border-red-500/50 text-red-500 rounded text-xs transition shadow-sm hover:bg-red-500/10" title="クリア"><i class="ph ph-trash"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <p id="timerSettingWarning" class="hidden text-red-500 text-xs mt-4 text-center">稼働中・一時停止中は時間を変更できません</p>
+        </div>
+    </div>
+
+    <!-- 環境音ミキサー設定モーダル -->
+    <div id="envSoundsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity p-4">
+        <div class="bg-themeBg text-themeText p-6 rounded-xl shadow-xl max-w-sm w-full border border-gray-400/20">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-lg font-bold flex items-center gap-2"><i class="ph ph-waves"></i> 環境音ミキサー</h3>
+                <button onclick="closeEnvModal()" class="text-xl opacity-60 hover:opacity-100 transition"><i class="ph ph-x"></i></button>
+            </div>
+            <div class="space-y-4 mb-6" id="envSoundsList">
+            </div>
+            <div class="border-t border-gray-400/20 pt-4">
+                <label class="text-xs opacity-80 mb-2 block font-medium">カスタム環境音 (ローカルファイル)</label>
+                <div class="flex gap-2 mb-2">
+                    <label class="flex-1 cursor-pointer p-2 rounded bg-themeSecondary border border-gray-400/30 text-xs focus:outline-none focus:ring-1 focus:ring-themePrimary text-center truncate hover:bg-gray-400/10 transition" id="customEnvFileLabel">
+                        ファイルを選択...
+                        <input type="file" id="customEnvFileInput" accept="audio/*" class="hidden" onchange="handleCustomEnvFile(event)">
+                    </label>
+                    <button onclick="clearCustomEnv()" class="px-3 py-2 border border-red-500/50 text-red-500 rounded text-xs transition shadow-sm whitespace-nowrap hover:bg-red-500/10" title="クリア"><i class="ph ph-trash"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- カスタムカラー設定モーダル -->
     <div id="themeModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity p-4">
@@ -457,13 +612,12 @@
             </div>
             <div class="overflow-y-auto custom-scrollbar flex-1 -mx-2 px-2">
                 <ul id="podcastHistoryList" class="divide-y divide-gray-400/20 text-sm">
-                    <!-- 履歴がここに入ります -->
                 </ul>
             </div>
         </div>
     </div>
 
-    <!-- アプリ本体コンテナ (スマホ時はパディングを減らして横幅を広く使う) -->
+    <!-- アプリ本体コンテナ -->
     <div class="max-w-3xl mx-auto space-y-6 pb-20 sm:space-y-8 sm:pb-24">
         
         <header class="flex justify-between items-center px-1">
@@ -477,6 +631,9 @@
                 <div class="w-px h-6 bg-gray-400/30 mx-1"></div>
                 <button onclick="setTheme('light')" class="w-6 h-6 rounded-full bg-[#f8fafc] border-2 border-gray-400" title="ライト"></button>
                 <button onclick="setTheme('dark')" class="w-6 h-6 rounded-full bg-[#0f172a] border-2 border-gray-400" title="ダーク"></button>
+                <button onclick="openEnvModal()" class="w-6 h-6 rounded-full bg-themeSecondary border-2 border-gray-400 flex items-center justify-center text-themeText" title="環境音ミキサー">
+                    <i class="ph ph-waves text-[12px]"></i>
+                </button>
                 <button onclick="openThemeModal()" class="w-6 h-6 rounded-full bg-gradient-to-br from-pink-400 via-purple-400 to-blue-400 border-2 border-gray-400 flex items-center justify-center text-white" title="カスタムカラー">
                     <i class="ph ph-palette text-[10px]"></i>
                 </button>
@@ -487,22 +644,32 @@
             
             <section id="section-todo" data-id="todo" class="module-section bg-themeSecondary rounded-xl shadow-sm overflow-hidden flex flex-col">
                 <div class="px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-gray-400/5 hover:bg-gray-400/10 transition">
-                    <!-- 左側のアイコンと文字の部分だけをドラッグ判定(drag-handle-module)にする -->
                     <h2 class="text-lg font-semibold flex items-center gap-2 drag-handle-module px-2 py-1 -ml-2 rounded hover:bg-gray-400/20 select-none" title="ドラッグして並べ替え">
                         <i class="ph ph-dots-six-vertical opacity-50"></i>
                         <i class="ph ph-list-checks"></i> ToDoリスト
                     </h2>
-                    <button onclick="toggleSection('todo')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
-                        <i class="ph ph-caret-up" id="icon-toggle-todo"></i>
-                    </button>
+                    <div class="flex items-center gap-1">
+                        <button onclick="openPip('todo')" class="p-2 hover:bg-gray-400/20 rounded transition text-lg cursor-pointer text-themeText opacity-70 hover:opacity-100" title="ピクチャインピクチャ">
+                            <i class="ph ph-picture-in-picture"></i>
+                        </button>
+                        <button onclick="toggleSection('todo')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
+                            <i class="ph ph-caret-up" id="icon-toggle-todo"></i>
+                        </button>
+                    </div>
                 </div>
                 <div id="content-todo" class="px-4 sm:px-6 pb-6 pt-2">
                     <div class="space-y-4 mb-6">
-                        <div class="relative">
-                            <input type="text" id="taskInput" placeholder="タスクを入力" class="w-full p-3 rounded-lg bg-themeBg border border-gray-400/30 focus:outline-none focus:ring-2 focus:ring-themePrimary text-sm sm:text-base" oninput="handleTaskInput()" onfocus="handleTaskInput()">
-                            <ul id="suggestList" class="absolute z-10 w-full bg-themeBg border border-gray-400/30 rounded-lg mt-1 hidden max-h-40 overflow-y-auto shadow-lg custom-scrollbar"></ul>
+                        <div class="relative flex items-center gap-2 bg-themeBg border border-gray-400/30 rounded-lg focus-within:ring-2 focus-within:ring-themePrimary pr-2 pl-1">
+                            <input type="text" id="taskInput" placeholder="タスクを入力" class="flex-1 p-3 bg-transparent border-none focus:outline-none text-sm sm:text-base" oninput="handleTaskInput()" onfocus="handleTaskInput()">
+                            
+                            <!-- 期限ボタンを視覚的にわかりやすく変更 -->
+                            <button id="datePickerBtn" onclick="window.openDatePicker()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gray-400/10 hover:bg-gray-400/20 transition text-xs font-medium text-themeText opacity-80 mr-1">
+                                <i class="ph ph-calendar-blank text-base" id="calendarIcon"></i>
+                                <span id="selectedDueDateText" data-date="">期限</span>
+                            </button>
+
+                            <ul id="suggestList" class="absolute top-full left-0 z-10 w-full bg-themeBg border border-gray-400/30 rounded-lg mt-1 hidden max-h-40 overflow-y-auto shadow-lg custom-scrollbar"></ul>
                         </div>
-                        <!-- スマホ画面で崩れないように gap-1, py-1, text-xs などを調整 -->
                         <div class="flex flex-wrap gap-1 sm:gap-2" id="categoryContainer"></div>
                         <button onclick="addTask()" class="w-full py-3 rounded-lg bg-themePrimary text-white font-medium hover:opacity-90 transition text-sm sm:text-base shadow-sm">
                             タスクを追加
@@ -512,20 +679,28 @@
                 </div>
             </section>
 
-            <section id="section-timer" data-id="timer" class="module-section bg-themeSecondary rounded-xl shadow-sm overflow-hidden flex flex-col">
+            <section id="section-timer" data-id="timer" class="module-section bg-themeSecondary rounded-xl shadow-sm overflow-hidden flex flex-col relative">
                 <div class="px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-gray-400/5 hover:bg-gray-400/10 transition">
                     <h2 class="text-lg font-semibold flex items-center gap-2 drag-handle-module px-2 py-1 -ml-2 rounded hover:bg-gray-400/20 select-none" title="ドラッグして並べ替え">
                         <i class="ph ph-dots-six-vertical opacity-50"></i>
                         <i class="ph ph-timer"></i> Focus Timer
                     </h2>
-                    <button onclick="toggleSection('timer')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
-                        <i class="ph ph-caret-up" id="icon-toggle-timer"></i>
-                    </button>
+                    <div class="flex items-center gap-1">
+                        <button onclick="openPip('timer')" class="p-2 hover:bg-gray-400/20 rounded transition text-lg cursor-pointer text-themeText opacity-70 hover:opacity-100" title="ピクチャインピクチャ">
+                            <i class="ph ph-picture-in-picture"></i>
+                        </button>
+                        <button onclick="toggleSection('timer')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
+                            <i class="ph ph-caret-up" id="icon-toggle-timer"></i>
+                        </button>
+                    </div>
                 </div>
-                <div id="content-timer" class="px-4 sm:px-6 pb-10 pt-4 text-center">
-                    <div id="activeTaskDisplay" class="mb-4 text-base sm:text-lg font-medium opacity-90 truncate px-2">タスクを選択してください</div>
-                    <div class="text-[5rem] sm:text-7xl font-bold font-mono tracking-tighter mb-6 leading-none" id="timerDisplay">25:00</div>
-                    <div class="flex justify-center gap-4">
+                <div id="content-timer" class="px-4 sm:px-6 pb-10 pt-4 text-center relative">
+                    <div class="flex flex-col items-center mb-2">
+                        <span id="timerModeLabel" class="text-xs font-bold px-3 py-1 rounded-full bg-themePrimary/10 text-themePrimary mb-2 border border-themePrimary/20">集中</span>
+                        <div id="activeTaskDisplay" class="text-base sm:text-lg font-medium opacity-90 truncate px-2 max-w-full">タスクを選択してください</div>
+                    </div>
+                    <div class="text-[5rem] sm:text-7xl font-bold font-mono tracking-tighter mb-6 leading-none transition select-none" id="timerDisplay">25:00</div>
+                    <div class="flex justify-center gap-4 relative z-10">
                         <button onclick="toggleTimer()" class="p-4 rounded-full bg-themePrimary text-white hover:opacity-90 transition shadow-md w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
                             <i class="ph ph-play text-2xl sm:text-3xl" id="playPauseIcon"></i>
                         </button>
@@ -533,6 +708,9 @@
                             <i class="ph ph-arrow-counter-clockwise text-2xl sm:text-3xl"></i>
                         </button>
                     </div>
+                    <button onclick="openTimerSettings()" class="absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-20 w-12 h-12 flex items-center justify-center rounded-full opacity-40 hover:opacity-100 hover:bg-gray-400/20 transition text-2xl" title="タイマー設定">
+                        <i class="ph ph-gear"></i>
+                    </button>
                 </div>
             </section>
 
@@ -542,9 +720,14 @@
                         <i class="ph ph-dots-six-vertical opacity-50"></i>
                         <i class="ph ph-speaker-hifi"></i> オーディオ
                     </h2>
-                    <button onclick="toggleSection('audio')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
-                        <i class="ph ph-caret-up" id="icon-toggle-audio"></i>
-                    </button>
+                    <div class="flex items-center gap-1">
+                        <button onclick="openPip('audio')" class="p-2 hover:bg-gray-400/20 rounded transition text-lg cursor-pointer text-themeText opacity-70 hover:opacity-100" title="ピクチャインピクチャ">
+                            <i class="ph ph-picture-in-picture"></i>
+                        </button>
+                        <button onclick="toggleSection('audio')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
+                            <i class="ph ph-caret-up" id="icon-toggle-audio"></i>
+                        </button>
+                    </div>
                 </div>
                 <div id="content-audio" class="px-4 sm:px-6 pb-6 pt-2">
                     <div class="flex gap-1 sm:gap-2 border-b border-gray-400/30 pb-2 mb-4">
@@ -555,12 +738,17 @@
 
                     <!-- Local Audio -->
                     <div id="tabContent_local" class="space-y-4">
-                        <div class="flex items-center gap-2 mb-2">
-                            <select id="playlistSelector" onchange="changePlaylist()" class="flex-1 p-2 rounded-lg bg-themeBg border border-gray-400/30 focus:outline-none text-xs sm:text-sm truncate">
-                                <option value="default">デフォルトプレイリスト</option>
+                        <div class="flex items-center gap-1 sm:gap-2 mb-2">
+                            <select id="playlistSelector" onchange="changePlaylist()" class="flex-1 w-0 p-2 rounded-lg bg-themeBg border border-gray-400/30 focus:outline-none text-xs sm:text-sm truncate">
                             </select>
-                            <button onclick="createNewPlaylist()" class="px-3 py-2 rounded-lg bg-themePrimary text-white text-xs sm:text-sm hover:opacity-90 transition whitespace-nowrap shadow-sm"><i class="ph ph-plus"></i> 新規</button>
-                            <button onclick="deleteCurrentPlaylist()" class="px-3 py-2 rounded-lg border border-red-500/50 text-red-500 text-xs sm:text-sm hover:bg-red-500/10 transition whitespace-nowrap"><i class="ph ph-trash"></i></button>
+                            <button onclick="createNewPlaylist()" class="px-2 sm:px-3 py-2 rounded-lg bg-themePrimary text-white text-xs sm:text-sm hover:opacity-90 transition whitespace-nowrap shadow-sm flex items-center justify-center"><i class="ph ph-plus"></i><span class="hidden sm:inline ml-1">新規</span></button>
+                            
+                            <button onclick="openEnvModal()" class="relative px-2 sm:px-3 py-2 rounded-lg bg-indigo-500 text-white text-xs sm:text-sm hover:opacity-90 transition whitespace-nowrap shadow-sm flex items-center justify-center gap-1" title="環境音ミキサー">
+                                <i class="ph ph-waves text-base"></i><span class="hidden sm:inline">環境音</span>
+                                <span id="envActiveBadge" class="hidden absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-themeBg"></span>
+                            </button>
+
+                            <button id="btnDeletePlaylist" onclick="deleteCurrentPlaylist()" class="px-2 sm:px-3 py-2 rounded-lg border border-red-500/50 text-red-500 text-xs sm:text-sm hover:bg-red-500/10 transition whitespace-nowrap flex items-center justify-center"><i class="ph ph-trash text-base"></i></button>
                         </div>
                         <div id="dropZone" class="flex items-center gap-4 transition-colors duration-200">
                             <label class="flex-1 cursor-pointer bg-themeBg border-2 border-dashed border-gray-400 p-4 sm:p-6 rounded-lg text-center hover:bg-themePrimary/10 transition">
@@ -569,7 +757,6 @@
                                 <input type="file" id="audioFileInput" accept="audio/*" multiple class="hidden" onchange="handleAudioUpload(event)">
                             </label>
                         </div>
-                        <!-- スマホ向けに Flexbox を折り返し(flex-wrap)対応に -->
                         <div class="bg-themeBg p-3 sm:p-4 rounded-lg border border-gray-400/20 space-y-3 shadow-sm">
                             <div class="text-xs sm:text-sm font-medium truncate" id="audioFileName">再生中の曲はありません</div>
                             <div class="flex items-center gap-2 sm:gap-3 text-[10px] sm:text-xs font-mono">
@@ -683,21 +870,19 @@
                                         <i class="ph ph-speaker-high text-xs sm:text-sm opacity-70"></i>
                                         <input type="range" id="podcastVolume" value="1" min="0" max="1" step="0.05" class="w-12 sm:w-16 cursor-pointer" oninput="changePodcastVolume()">
                                     </div>
-                                    <!-- プレイヤー右下の保存ボタン -->
                                     <button id="pc-player-fav-btn" class="ml-1 p-1 rounded transition opacity-50 cursor-default" disabled onclick="toggleCurrentPodcastFav()" title="あとで聴くに保存">
                                         <i class="ph ph-bookmark-simple text-base sm:text-lg" id="pc-player-fav-icon"></i>
                                     </button>
                                 </div>
                                 <div class="flex gap-2 sm:gap-4 items-center mx-auto sm:mx-0">
                                     <button onclick="skipPodcast(-15)" class="hover:opacity-70 disabled:opacity-30 flex items-center justify-center" id="pc-btn-skip-back" disabled><i class="ph ph-rewind text-lg sm:text-xl"></i></button>
-                                    <button onclick="togglePodcastPlay()" class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-themePrimary text-white flex items-center justify-center hover:opacity-90 disabled:opacity-50 shadow-md" id="pc-btn-play" disabled><i class="ph ph-play text-lg sm:text-xl" id="pc-play-icon"></i></button>
+                                    <button onclick="togglePodcastPlay()" class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-themePrimary text-white flex items-center justify-center hover:opacity-90 disabled:opacity-50 shadow-md" id="pc-btn-play"><i class="ph ph-play text-lg sm:text-xl" id="pc-play-icon"></i></button>
                                     <button onclick="skipPodcast(15)" class="hover:opacity-70 disabled:opacity-30 flex items-center justify-center" id="pc-btn-skip-forward" disabled><i class="ph ph-fast-forward text-lg sm:text-xl"></i></button>
                                 </div>
                             </div>
                         </div>
                         <audio id="podcastAudio" class="hidden"></audio>
 
-                        <!-- あとで聴く リスト -->
                         <div class="pt-4 border-t border-gray-400/20">
                             <h3 class="text-xs sm:text-sm font-semibold mb-2 flex items-center gap-1"><i class="ph ph-bookmarks"></i> あとで聴く (最大30件)</h3>
                             <div class="bg-themeBg rounded-lg border border-gray-400/20 max-h-48 overflow-y-auto custom-scrollbar">
@@ -714,21 +899,307 @@
                 <div class="px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-gray-400/5 hover:bg-gray-400/10 transition">
                     <h2 class="text-lg font-semibold flex items-center gap-2 drag-handle-module px-2 py-1 -ml-2 rounded hover:bg-gray-400/20 select-none" title="ドラッグして並べ替え">
                         <i class="ph ph-dots-six-vertical opacity-50"></i>
-                        <i class="ph ph-chart-bar"></i> 学習記録 (直近7日間)
+                        <i class="ph ph-chart-bar"></i> 記録
                     </h2>
                     <button onclick="toggleSection('chart')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
                         <i class="ph ph-caret-up" id="icon-toggle-chart"></i>
                     </button>
                 </div>
                 <div id="content-chart" class="px-4 sm:px-6 pb-6 pt-2">
-                    <div class="bg-themeBg p-2 sm:p-4 rounded-lg border border-gray-400/20">
+                    
+                    <div class="flex gap-2 border-b border-gray-400/30 pb-2 mb-4">
+                        <button onclick="switchChartTab('chart')" id="tabBtnChart_chart" class="px-3 py-1 text-xs sm:text-sm font-medium border-b-2 border-themePrimary text-themePrimary transition">学習時間 (7日間)</button>
+                        <button onclick="switchChartTab('heatmap')" id="tabBtnChart_heatmap" class="px-3 py-1 text-xs sm:text-sm font-medium border-b-2 border-transparent opacity-60 hover:opacity-100 transition">タスク完了 (ヒートマップ)</button>
+                    </div>
+                    
+                    <div id="tabContentChart_chart" class="bg-themeBg p-2 sm:p-4 rounded-lg border border-gray-400/20">
                         <canvas id="studyChart" height="200"></canvas>
                     </div>
+                    
+                    <div id="tabContentChart_heatmap" class="hidden bg-themeBg p-4 rounded-lg border border-gray-400/20 overflow-x-auto custom-scrollbar-x pb-4">
+                        <div id="heatmapContainer" class="flex gap-1 min-w-max relative" onmouseleave="hideTooltip()"></div>
+                        <div class="flex justify-between items-center mt-4 text-[10px] sm:text-xs opacity-60">
+                            <span>先月1日 〜 今日</span>
+                            <div class="flex items-center gap-1">
+                                <span>Less</span>
+                                <div class="w-3 h-3 sm:w-4 sm:h-4 bg-gray-400/10 rounded-sm"></div>
+                                <div class="w-3 h-3 sm:w-4 sm:h-4 bg-themePrimary/40 rounded-sm"></div>
+                                <div class="w-3 h-3 sm:w-4 sm:h-4 bg-themePrimary/70 rounded-sm"></div>
+                                <div class="w-3 h-3 sm:w-4 sm:h-4 bg-themePrimary rounded-sm"></div>
+                                <span>More</span>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
             </section>
 
         </div>
     </div>
+
+    <!-- カレンダーモーダル -->
+    <div id="datePickerModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity p-4">
+        <div class="bg-themeBg text-themeText p-6 rounded-xl shadow-xl max-w-[280px] w-full border border-gray-400/20 relative">
+            <button onclick="window.closeDatePicker()" class="absolute top-4 right-4 text-xl opacity-60 hover:opacity-100 transition"><i class="ph ph-x"></i></button>
+            <div class="flex justify-between items-center mb-4 pr-6">
+                <button onclick="window.changeMonth(-1)" class="p-1 hover:bg-gray-400/20 rounded"><i class="ph ph-caret-left"></i></button>
+                <div id="calendarMonthYear" class="font-bold text-sm"></div>
+                <button onclick="window.changeMonth(1)" class="p-1 hover:bg-gray-400/20 rounded"><i class="ph ph-caret-right"></i></button>
+            </div>
+            <div class="grid grid-cols-7 gap-1 text-center text-[10px] opacity-70 mb-2">
+                <div>日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div>
+            </div>
+            <div id="calendarGrid" class="grid grid-cols-7 gap-1 text-center text-xs"></div>
+            <div class="mt-4 pt-4 border-t border-gray-400/20 flex justify-end">
+                <button onclick="window.clearDatePicker()" class="text-xs text-red-500 hover:bg-red-500/10 px-3 py-1.5 rounded transition">未設定にする</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ツールチップ用要素 -->
+    <div id="heatmapTooltip" class="hidden fixed z-50 pointer-events-none bg-themeBg text-themeText p-3 rounded-lg shadow-lg border border-gray-400/20 text-xs w-48 transition-opacity duration-150">
+        <div id="tooltipDate" class="font-bold mb-1 border-b border-gray-400/30 pb-1"></div>
+        <ul id="tooltipList" class="space-y-1"></ul>
+    </div>
+
+    <!-- Document Picture-in-Picture API 実装ロジック -->
+    <script>
+        window.activeAudioContext = 'local';
+        window.spotifyIsPaused = true;
+        window.spotifyTrackName = '';
+
+        async function openPip(type) {
+            if (!('documentPictureInPicture' in window)) {
+                alert('お使いのブラウザは Document Picture-in-Picture API に対応していません。PC版のChrome系ブラウザ等をご利用ください。');
+                return;
+            }
+
+            const pipWindow = await window.documentPictureInPicture.requestWindow({
+                width: 320,
+                height: 220
+            });
+
+            // メイン画面のスタイルシートをPiP窓にコピー
+            [...document.styleSheets].forEach((styleSheet) => {
+                try {
+                    const cssRules = [...styleSheet.cssRules].map((rule) => rule.cssText).join('');
+                    const style = pipWindow.document.createElement('style');
+                    style.textContent = cssRules;
+                    pipWindow.document.head.appendChild(style);
+                } catch (e) {
+                    const link = pipWindow.document.createElement('link');
+                    link.rel = 'stylesheet';
+                    link.href = styleSheet.href;
+                    pipWindow.document.head.appendChild(link);
+                }
+            });
+
+            const tailwindScript = pipWindow.document.createElement('script');
+            tailwindScript.src = 'https://cdn.tailwindcss.com';
+            pipWindow.document.head.appendChild(tailwindScript);
+
+            const phosphor = pipWindow.document.createElement('script');
+            phosphor.src = 'https://unpkg.com/@phosphor-icons/web';
+            pipWindow.document.head.appendChild(phosphor);
+
+            const container = pipWindow.document.createElement('div');
+            container.className = "p-4 bg-themeBg text-themeText h-full flex flex-col justify-between select-none";
+            pipWindow.document.body.appendChild(container);
+
+            if (type === 'todo') {
+                container.innerHTML = `
+                    <div class="font-bold text-sm mb-3 flex items-center gap-1 opacity-80"><i class="ph ph-list-checks text-lg"></i> ToDoリスト</div>
+                    <div id="pipTodoList" class="space-y-2 overflow-y-auto flex-1 text-sm custom-scrollbar pr-1"></div>
+                `;
+                const updatePipTodo = () => {
+                    const list = pipWindow.document.getElementById('pipTodoList');
+                    if (!list) return;
+                    list.innerHTML = '';
+                    const sortedTasks = [...window.tasks].filter(t => !t.completed).slice(0, 8);
+                    if (sortedTasks.length === 0) {
+                        list.innerHTML = '<div class="opacity-50 text-center py-6">未完了のタスクはありません</div>';
+                        return;
+                    }
+                    sortedTasks.forEach(t => {
+                        const item = pipWindow.document.createElement('div');
+                        item.className = "p-3 bg-themeSecondary rounded-lg flex items-center gap-3 text-sm cursor-pointer hover:bg-gray-400/20 transition group shadow-sm";
+                        item.innerHTML = `
+                            <button class="w-5 h-5 rounded-full border-2 border-themePrimary flex items-center justify-center flex-shrink-0 group-hover:bg-themePrimary/10 transition">
+                                <i class="ph ph-check text-xs text-transparent group-hover:text-themePrimary transition"></i>
+                            </button>
+                            <span class="truncate flex-1 font-medium">${t.title}</span>
+                        `;
+                        // PiP側からメイン側の完了関数を呼び出す
+                        item.onclick = () => window.toggleTaskCompletion(t.id, t.completed);
+                        list.appendChild(item);
+                    });
+                };
+                updatePipTodo();
+                const interval = setInterval(() => {
+                    if (pipWindow.closed) { clearInterval(interval); return; }
+                    updatePipTodo();
+                }, 1000);
+
+            } else if (type === 'timer') {
+                container.innerHTML = `
+                    <div class="text-center flex flex-col justify-center h-full space-y-4">
+                        <div>
+                            <div id="pipTimerMode" class="text-sm font-bold px-3 py-1 rounded-full bg-themePrimary/10 text-themePrimary inline-block mb-2 mx-auto">集中</div>
+                            <div id="pipTimerDisplay" class="text-6xl font-bold font-mono tracking-tighter my-2">25:00</div>
+                            <div id="pipTaskDisplay" class="text-sm font-medium opacity-80 truncate px-4">タスク未選択</div>
+                        </div>
+                        <div class="flex justify-center gap-4 mt-2">
+                            <button id="pipToggleBtn" class="p-4 w-14 h-14 flex items-center justify-center rounded-full bg-themePrimary text-white shadow-md hover:opacity-90 transition"><i class="ph ph-play text-2xl" id="pipPlayIcon"></i></button>
+                            <button id="pipResetBtn" class="p-4 w-14 h-14 flex items-center justify-center rounded-full bg-themeSecondary text-themeText shadow-md hover:opacity-80 transition"><i class="ph ph-arrow-counter-clockwise text-2xl"></i></button>
+                        </div>
+                    </div>
+                `;
+                pipWindow.document.getElementById('pipToggleBtn').onclick = () => { window.toggleTimer(); };
+                pipWindow.document.getElementById('pipResetBtn').onclick = () => { window.resetTimer(); };
+
+                const interval = setInterval(() => {
+                    if (pipWindow.closed) { clearInterval(interval); return; }
+                    const display = pipWindow.document.getElementById('pipTimerDisplay');
+                    const mode = pipWindow.document.getElementById('pipTimerMode');
+                    const task = pipWindow.document.getElementById('pipTaskDisplay');
+                    const icon = pipWindow.document.getElementById('pipPlayIcon');
+
+                    if (display) {
+                        display.textContent = document.getElementById('timerDisplay').textContent;
+                        display.style.fontFamily = document.getElementById('timerDisplay').style.fontFamily;
+                    }
+                    if (mode) {
+                        mode.textContent = window.timerMode === 'focus' ? '集中' : '休憩';
+                        mode.className = window.timerMode === 'focus' ? "text-sm font-bold px-3 py-1 rounded-full bg-themePrimary/10 text-themePrimary inline-block mb-1 mx-auto" : "text-sm font-bold px-3 py-1 rounded-full bg-green-500/10 text-green-600 inline-block mb-1 mx-auto";
+                    }
+                    if (task) task.textContent = document.getElementById('activeTaskDisplay').textContent;
+                    if (icon) icon.className = window.isRunning ? "ph ph-pause text-2xl" : "ph ph-play text-2xl";
+                }, 200);
+
+            } else if (type === 'audio') {
+                container.innerHTML = `
+                    <div class="text-center flex flex-col justify-between h-full py-2">
+                        <div class="font-bold text-[10px] mb-1 flex items-center justify-center gap-1 opacity-70">
+                            <i class="ph ph-speaker-hifi text-sm"></i> <span id="pipAudioSourceLabel">Local Audio</span>
+                        </div>
+                        
+                        <div class="flex-1 flex flex-col justify-center">
+                            <div id="pipAudioName" class="text-base font-bold truncate px-2 mb-4">再生中の曲はありません</div>
+                            
+                            <div class="flex justify-center items-center gap-6 mb-5">
+                                <button id="pipAudioPrev" class="hover:opacity-70 transition p-2"><i class="ph ph-skip-back-circle text-3xl opacity-80"></i></button>
+                                <button id="pipAudioToggle" class="w-14 h-14 flex items-center justify-center rounded-full bg-themePrimary text-white shadow-lg hover:opacity-90 transition"><i class="ph ph-play text-2xl" id="pipAudioIcon"></i></button>
+                                <button id="pipAudioNext" class="hover:opacity-70 transition p-2"><i class="ph ph-skip-forward-circle text-3xl opacity-80"></i></button>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center justify-between px-4 py-2 bg-themeSecondary rounded-lg">
+                            <div class="flex items-center gap-1">
+                                <i class="ph ph-person-simple-run opacity-70 text-sm"></i>
+                                <select id="pipAudioSpeed" class="bg-transparent text-xs font-medium focus:outline-none cursor-pointer">
+                                    <option value="0.5">0.5x</option><option value="0.8">0.8x</option><option value="1.0">1.0x</option><option value="1.2">1.2x</option><option value="1.5">1.5x</option><option value="2.0">2.0x</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <i class="ph ph-speaker-high text-sm opacity-70"></i>
+                                <input type="range" id="pipAudioVol" min="0" max="1" step="0.05" class="w-20 h-1.5 cursor-pointer accent-themePrimary bg-gray-400/50 rounded-lg appearance-none">
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // PiPからの操作イベント
+                pipWindow.document.getElementById('pipAudioToggle').onclick = () => { 
+                    if (window.activeAudioContext === 'local') window.toggleAudio();
+                    else if (window.activeAudioContext === 'spotify') window.toggleSpotifyPlay();
+                    else if (window.activeAudioContext === 'podcast') window.togglePodcastPlay();
+                };
+                pipWindow.document.getElementById('pipAudioPrev').onclick = () => { 
+                    if (window.activeAudioContext === 'local') window.playPrevTrack();
+                    else if (window.activeAudioContext === 'spotify') window.prevSpotifyTrack();
+                    else if (window.activeAudioContext === 'podcast') window.skipPodcast(-15);
+                };
+                pipWindow.document.getElementById('pipAudioNext').onclick = () => { 
+                    if (window.activeAudioContext === 'local') window.playNextTrack();
+                    else if (window.activeAudioContext === 'spotify') window.nextSpotifyTrack();
+                    else if (window.activeAudioContext === 'podcast') window.skipPodcast(15);
+                };
+                pipWindow.document.getElementById('pipAudioSpeed').onchange = (e) => {
+                    const val = e.target.value;
+                    if (window.activeAudioContext === 'local') {
+                        document.getElementById('audioSpeed').value = val;
+                        window.changeAudioSpeed();
+                    } else if (window.activeAudioContext === 'podcast') {
+                        document.getElementById('pc-speed').value = val;
+                        window.changePodcastSpeed();
+                    }
+                };
+                pipWindow.document.getElementById('pipAudioVol').oninput = (e) => {
+                    const val = e.target.value;
+                    if (window.activeAudioContext === 'local') {
+                        document.getElementById('localVolume').value = val;
+                        window.changeLocalVolume();
+                    } else if (window.activeAudioContext === 'spotify') {
+                        document.getElementById('spotifyVolume').value = val;
+                        window.changeSpotifyVolume();
+                    } else if (window.activeAudioContext === 'podcast') {
+                        document.getElementById('podcastVolume').value = val;
+                        window.changePodcastVolume();
+                    }
+                };
+
+                const interval = setInterval(() => {
+                    if (pipWindow.closed) { clearInterval(interval); return; }
+                    const ctx = window.activeAudioContext;
+                    const nameEl = pipWindow.document.getElementById('pipAudioName');
+                    const iconEl = pipWindow.document.getElementById('pipAudioIcon');
+                    const sourceLabel = pipWindow.document.getElementById('pipAudioSourceLabel');
+                    const speedEl = pipWindow.document.getElementById('pipAudioSpeed');
+                    const volEl = pipWindow.document.getElementById('pipAudioVol');
+
+                    let name = "再生中の曲はありません";
+                    let isPaused = true;
+                    let vol = 1;
+                    let speed = 1;
+                    let disableSpeed = false;
+
+                    // フォーカスされているコンテキストのデータを取得
+                    if (ctx === 'local') {
+                        sourceLabel.innerHTML = '<i class="ph ph-folder-music text-sm"></i> Local / Lo-fi';
+                        name = document.getElementById('audioFileName').textContent;
+                        isPaused = window.audioPlayer ? window.audioPlayer.paused : true;
+                        vol = window.audioPlayer ? window.audioPlayer.volume : 1;
+                        speed = window.audioPlayer ? window.audioPlayer.playbackRate : 1;
+                    } else if (ctx === 'spotify') {
+                        sourceLabel.innerHTML = '<i class="ph ph-spotify-logo text-sm"></i> Spotify';
+                        name = window.spotifyTrackName || "曲が選択されていません";
+                        isPaused = window.spotifyIsPaused !== false;
+                        vol = document.getElementById('spotifyVolume').value;
+                        disableSpeed = true;
+                    } else if (ctx === 'podcast') {
+                        sourceLabel.innerHTML = '<i class="ph ph-microphone-stage text-sm"></i> Podcast';
+                        name = document.getElementById('pc-episode-title').textContent;
+                        isPaused = window.podcastAudio ? window.podcastAudio.paused : true;
+                        vol = window.podcastAudio ? window.podcastAudio.volume : 1;
+                        speed = window.podcastAudio ? window.podcastAudio.playbackRate : 1;
+                    }
+
+                    if (nameEl) nameEl.textContent = name;
+                    if (iconEl) iconEl.className = isPaused ? "ph ph-play text-2xl" : "ph ph-pause text-2xl";
+                    
+                    // ユーザーがPiP側でスライダーを操作中でない場合のみUIを同期
+                    if (speedEl && pipWindow.document.activeElement !== speedEl) {
+                        speedEl.value = speed;
+                        speedEl.disabled = disableSpeed;
+                        speedEl.style.opacity = disableSpeed ? '0.3' : '1';
+                    }
+                    if (volEl && pipWindow.document.activeElement !== volEl) {
+                        volEl.value = vol;
+                    }
+                }, 200);
+            }
+        }
+    </script>
 
     <!-- UI制御 & カスタムテーマ ロジック -->
     <script>
@@ -851,7 +1322,170 @@
         setTheme(localStorage.getItem('app-theme') || 'light');
     </script>
 
-    <!-- アプリケーションのメインロジック -->
+    <!-- 環境音ミキサー制御ロジック -->
+    <script>
+        const envPresets = [
+            { id: 'rain', name: '雨の音', icon: 'ph-cloud-rain', defaultUrl: './audio/env/rain.mp3' },
+            { id: 'cafe', name: 'カフェ', icon: 'ph-coffee', defaultUrl: './audio/env/cafe.mp3' },
+            { id: 'fire', name: '焚き火', icon: 'ph-campfire', defaultUrl: './audio/env/fire.mp3' }
+        ];
+
+        let envData = JSON.parse(localStorage.getItem('workside_env_sounds')) || {
+            rain: { active: false, volume: 0.5, url: envPresets[0].defaultUrl },
+            cafe: { active: false, volume: 0.5, url: envPresets[1].defaultUrl },
+            fire: { active: false, volume: 0.5, url: envPresets[2].defaultUrl },
+            custom: { active: false, volume: 0.5, url: '', name: '' }
+        };
+        const envAudioElements = {};
+
+        async function initEnvSounds() {
+            const customFile = await localforage.getItem('custom_env_file');
+            if (customFile) {
+                const url = URL.createObjectURL(customFile);
+                envData.custom.url = url;
+                envData.custom.name = customFile.name;
+                const label = document.getElementById('customEnvFileLabel');
+                if (label) {
+                    label.innerHTML = `<i class="ph ph-file-audio"></i> ${customFile.name}<input type="file" id="customEnvFileInput" accept="audio/*" class="hidden" onchange="handleCustomEnvFile(event)">`;
+                }
+            }
+
+            Object.keys(envData).forEach(key => {
+                const audio = new Audio();
+                audio.loop = true;
+                audio.volume = envData[key].volume;
+                if (envData[key].url) audio.src = envData[key].url;
+                envAudioElements[key] = audio;
+                if (envData[key].active && audio.src) {
+                    audio.play().catch(e => console.log("Auto-play blocked for Env Sound", e));
+                }
+            });
+            updateEnvBadge();
+        }
+
+        function openEnvModal() {
+            renderEnvModalList();
+            document.getElementById('envSoundsModal').classList.remove('hidden');
+        }
+
+        function closeEnvModal() {
+            document.getElementById('envSoundsModal').classList.add('hidden');
+        }
+
+        function renderEnvModalList() {
+            const listEl = document.getElementById('envSoundsList');
+            listEl.innerHTML = '';
+            
+            envPresets.forEach(preset => {
+                const data = envData[preset.id];
+                listEl.innerHTML += `
+                    <div class="flex items-center justify-between p-3 rounded-lg bg-gray-400/5 border border-gray-400/20">
+                        <div class="flex items-center gap-2">
+                            <button onclick="toggleEnvSound('${preset.id}')" class="w-8 h-8 flex items-center justify-center rounded-full transition ${data.active ? 'bg-themePrimary text-white shadow-md' : 'bg-gray-400/20 opacity-60 hover:opacity-100'}">
+                                <i class="ph ${preset.icon} text-lg"></i>
+                            </button>
+                            <span class="text-sm font-medium ${data.active ? '' : 'opacity-60'}">${preset.name}</span>
+                        </div>
+                        <input type="range" min="0" max="1" step="0.05" value="${data.volume}" class="w-24 cursor-pointer" oninput="changeEnvVolume('${preset.id}', this.value)">
+                    </div>
+                `;
+            });
+
+            const customData = envData.custom;
+            listEl.innerHTML += `
+                <div class="flex items-center justify-between p-3 rounded-lg bg-gray-400/5 border border-gray-400/20">
+                    <div class="flex items-center gap-2">
+                        <button onclick="toggleEnvSound('custom')" class="w-8 h-8 flex items-center justify-center rounded-full transition ${customData.active ? 'bg-themePrimary text-white shadow-md' : 'bg-gray-400/20 opacity-60 hover:opacity-100'}" title="カスタム環境音">
+                            <i class="ph ph-music-notes text-lg"></i>
+                        </button>
+                        <span class="text-sm font-medium ${customData.active ? '' : 'opacity-60'}">カスタム</span>
+                    </div>
+                    <input type="range" min="0" max="1" step="0.05" value="${customData.volume}" class="w-24 cursor-pointer" oninput="changeEnvVolume('custom', this.value)">
+                </div>
+            `;
+        }
+
+        function toggleEnvSound(id) {
+            envData[id].active = !envData[id].active;
+            const audio = envAudioElements[id];
+            
+            if (envData[id].active) {
+                if (audio.src && audio.src !== window.location.href) {
+                    audio.play().catch(e => alert("音源URLが正しくないか、再生がブロックされました"));
+                } else if (id === 'custom') {
+                    alert("カスタム環境音のファイルを選択してください");
+                    envData[id].active = false;
+                }
+            } else {
+                audio.pause();
+            }
+            
+            localStorage.setItem('workside_env_sounds', JSON.stringify(envData));
+            renderEnvModalList();
+            updateEnvBadge();
+        }
+
+        function changeEnvVolume(id, vol) {
+            envData[id].volume = parseFloat(vol);
+            if (envAudioElements[id]) envAudioElements[id].volume = envData[id].volume;
+            localStorage.setItem('workside_env_sounds', JSON.stringify(envData));
+        }
+
+        async function handleCustomEnvFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            await localforage.setItem('custom_env_file', file);
+            const url = URL.createObjectURL(file);
+            envData.custom.url = url;
+            envData.custom.name = file.name;
+            
+            const label = document.getElementById('customEnvFileLabel');
+            label.innerHTML = `<i class="ph ph-file-audio"></i> ${file.name}<input type="file" id="customEnvFileInput" accept="audio/*" class="hidden" onchange="handleCustomEnvFile(event)">`;
+            
+            if (envAudioElements.custom) {
+                const wasPlaying = !envAudioElements.custom.paused;
+                envAudioElements.custom.src = url;
+                if (wasPlaying) envAudioElements.custom.play();
+            }
+            
+            localStorage.setItem('workside_env_sounds', JSON.stringify(envData));
+        }
+
+        async function clearCustomEnv() {
+            await localforage.removeItem('custom_env_file');
+            envData.custom.url = '';
+            envData.custom.name = '';
+            envData.custom.active = false;
+            
+            if (envAudioElements.custom) {
+                envAudioElements.custom.pause();
+                if (envAudioElements.custom.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(envAudioElements.custom.src);
+                }
+                envAudioElements.custom.src = '';
+            }
+            
+            const label = document.getElementById('customEnvFileLabel');
+            label.innerHTML = `ファイルを選択...<input type="file" id="customEnvFileInput" accept="audio/*" class="hidden" onchange="handleCustomEnvFile(event)">`;
+            
+            localStorage.setItem('workside_env_sounds', JSON.stringify(envData));
+            renderEnvModalList();
+            updateEnvBadge();
+        }
+
+        function updateEnvBadge() {
+            const badge = document.getElementById('envActiveBadge');
+            if(!badge) return;
+            const isActive = Object.values(envData).some(d => d.active);
+            if (isActive) badge.classList.remove('hidden');
+            else badge.classList.add('hidden');
+        }
+
+        document.addEventListener('DOMContentLoaded', initEnvSounds);
+    </script>
+
+    <!-- メインロジック & タイマー拡張 -->
     <script>
         const categories = [
             { id: 'dev', name: '開発・実装', icon: 'ph-code', color: '#3b82f6' },
@@ -863,8 +1497,6 @@
         
         window.taskHistory = JSON.parse(localStorage.getItem('workside_task_history')) || [];
         window.podcastFavorites = [];
-        
-        // 視聴済み管理と履歴管理
         window.podcastFinished = JSON.parse(localStorage.getItem('workside_podcast_finished')) || {};
         window.podcastHistory = JSON.parse(localStorage.getItem('workside_podcast_history')) || [];
         window.currentPlayingPodcast = null;
@@ -898,15 +1530,9 @@
             suggestList.innerHTML = '';
             
             const history = JSON.parse(localStorage.getItem('workside_task_history')) || [];
-            
-            if (history.length === 0) {
-                suggestList.classList.add('hidden');
-                return;
-            }
+            if (history.length === 0) { suggestList.classList.add('hidden'); return; }
 
-            const matches = query.length === 0 
-                ? history.slice(0, 10)
-                : history.filter(task => task.title.toLowerCase().includes(query)).slice(0, 10);
+            const matches = query.length === 0 ? history.slice(0, 10) : history.filter(task => task.title.toLowerCase().includes(query)).slice(0, 10);
 
             if (matches.length > 0) {
                 suggestList.classList.remove('hidden');
@@ -915,7 +1541,6 @@
                     li.className = 'hover:bg-gray-400/20 flex justify-between items-center text-xs sm:text-sm p-0 m-0 border-b border-gray-400/10 last:border-0';
                     const catName = categories.find(c => c.id === match.categoryId).name;
                     
-                    // 文字列クリック部分 (タスク追加)
                     const contentDiv = document.createElement('div');
                     contentDiv.className = 'flex-1 truncate py-3 pl-4 cursor-pointer';
                     contentDiv.innerHTML = `<span>${match.title}</span> <span class="text-[10px] sm:text-xs opacity-60 ml-2">${catName}</span>`;
@@ -931,8 +1556,7 @@
                     deleteBtn.className = 'p-2 mr-2 my-1 hover:bg-red-500/20 rounded-full text-red-500 transition flex-shrink-0 flex items-center justify-center';
                     deleteBtn.innerHTML = '<i class="ph ph-x"></i>';
                     deleteBtn.onmousedown = (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
+                        e.preventDefault(); e.stopPropagation();
                         const newHistory = history.filter(t => t.title !== match.title);
                         localStorage.setItem('workside_task_history', JSON.stringify(newHistory));
                         handleTaskInput(); 
@@ -954,14 +1578,186 @@
             window.currentActiveCategoryId = categoryId; 
         }
 
+        // 遅延評価による日替わり（追いつき）処理とヒートマップ描画
+        window.switchChartTab = function(tabId) {
+            ['chart', 'heatmap'].forEach(id => {
+                const btn = document.getElementById(`tabBtnChart_${id}`);
+                const content = document.getElementById(`tabContentChart_${id}`);
+                if (id === tabId) {
+                    btn.classList.add('border-themePrimary', 'text-themePrimary');
+                    btn.classList.remove('border-transparent', 'opacity-60');
+                    content.classList.remove('hidden');
+                    if (id === 'heatmap') window.renderHeatmap();
+                } else {
+                    btn.classList.remove('border-themePrimary', 'text-themePrimary');
+                    btn.classList.add('border-transparent', 'opacity-60');
+                    content.classList.add('hidden');
+                }
+            });
+        };
+
+        window.renderHeatmap = function() {
+            const container = document.getElementById('heatmapContainer');
+            if (!container) return;
+            container.innerHTML = '';
+            
+            const localStats = JSON.parse(localStorage.getItem('workside_stats')) || { heatmap: {} };
+            const heatmapData = localStats.heatmap || {};
+            
+            const today = new Date();
+            const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            
+            const startGrid = new Date(start);
+            startGrid.setDate(start.getDate() - start.getDay()); // カレンダーの始まり(日曜日)を計算
+            
+            const weeks = [];
+            let currentWeek = [];
+            
+            for (let d = new Date(startGrid); d <= today; d.setDate(d.getDate() + 1)) {
+                const dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                const isOutOfRange = d < start;
+                const cellData = heatmapData[dateStr] || { count: 0, tasks: [] };
+                const count = isOutOfRange ? -1 : cellData.count;
+                
+                currentWeek.push({ date: dateStr, count: count, tasks: cellData.tasks });
+                
+                if (currentWeek.length === 7) {
+                    weeks.push(currentWeek);
+                    currentWeek = [];
+                }
+            }
+            if (currentWeek.length > 0) weeks.push(currentWeek);
+            
+            weeks.forEach(week => {
+                const col = document.createElement('div');
+                col.className = 'flex flex-col gap-1';
+                week.forEach(day => {
+                    const cell = document.createElement('div');
+                    cell.className = 'w-3 h-3 sm:w-4 sm:h-4 rounded-sm transition-colors duration-300';
+                    
+                    if (day.count === -1) {
+                        cell.classList.add('bg-transparent');
+                    } else {
+                        if (day.count === 0) cell.classList.add('bg-gray-400/10');
+                        else if (day.count <= 2) cell.classList.add('bg-themePrimary/40');
+                        else if (day.count <= 4) cell.classList.add('bg-themePrimary/70');
+                        else cell.classList.add('bg-themePrimary');
+                        
+                        // ツールチップイベント
+                        cell.onmouseenter = (e) => window.showTooltip(e, day.date, day.count, day.tasks);
+                        cell.onmousemove = (e) => window.moveTooltip(e);
+                    }
+                    col.appendChild(cell);
+                });
+                container.appendChild(col);
+            });
+        };
+
+        window.runCatchupProcess = async function() {
+            const todayObj = new Date();
+            const todayStr = todayObj.getFullYear() + '-' + String(todayObj.getMonth()+1).padStart(2, '0') + '-' + String(todayObj.getDate()).padStart(2, '0');
+            
+            let localStats = JSON.parse(localStorage.getItem('workside_stats')) || { heatmap: {}, lastProcessed: '' };
+            
+            if (localStats.lastProcessed === todayStr) {
+                window.renderTasks();
+                if(document.getElementById('tabContentChart_heatmap') && !document.getElementById('tabContentChart_heatmap').classList.contains('hidden')) {
+                    window.renderHeatmap();
+                }
+                return; 
+            }
+
+            if (!localStats.lastProcessed) {
+                const yesterday = new Date(todayObj);
+                yesterday.setDate(yesterday.getDate() - 1);
+                localStats.lastProcessed = yesterday.getFullYear() + '-' + String(yesterday.getMonth()+1).padStart(2, '0') + '-' + String(yesterday.getDate()).padStart(2, '0');
+            }
+
+            let tasksChanged = false;
+            let tasksToDelete = [];
+            let tasksToUpdate = [];
+
+            window.tasks.forEach(task => {
+                if (!task.dueDate) {
+                    if (task.completed) {
+                        if(!localStats.heatmap[localStats.lastProcessed]) localStats.heatmap[localStats.lastProcessed] = { count: 0, tasks: [] };
+                        localStats.heatmap[localStats.lastProcessed].count += 1;
+                        localStats.heatmap[localStats.lastProcessed].tasks.push(task.title);
+                        
+                        task.completed = false;
+                        tasksToUpdate.push(task);
+                        tasksChanged = true;
+                    }
+                } else {
+                    if (task.dueDate < todayStr) {
+                        if (task.completed) {
+                            if(!localStats.heatmap[task.dueDate]) localStats.heatmap[task.dueDate] = { count: 0, tasks: [] };
+                            localStats.heatmap[task.dueDate].count += 1;
+                            localStats.heatmap[task.dueDate].tasks.push(task.title);
+                        }
+                        tasksToDelete.push(task.id);
+                        tasksChanged = true;
+                    }
+                }
+            });
+
+            const lastMonth = new Date(todayObj.getFullYear(), todayObj.getMonth() - 1, 1);
+            const lastMonthStr = lastMonth.getFullYear() + '-' + String(lastMonth.getMonth()+1).padStart(2, '0') + '-' + String(lastMonth.getDate()).padStart(2, '0');
+            
+            Object.keys(localStats.heatmap).forEach(date => {
+                if (date < lastMonthStr) {
+                    delete localStats.heatmap[date];
+                }
+            });
+
+            localStats.lastProcessed = todayStr;
+            localStorage.setItem('workside_stats', JSON.stringify(localStats));
+
+            if (tasksChanged) {
+                window.tasks = window.tasks.filter(t => !tasksToDelete.includes(t.id));
+                
+                if (window.currentUser) {
+                    const batch = window.writeBatch(window.db);
+                    tasksToUpdate.forEach(t => {
+                        batch.update(window.doc(window.db, "tasks", t.id), { completed: false });
+                    });
+                    tasksToDelete.forEach(id => {
+                        batch.delete(window.doc(window.db, "tasks", id));
+                    });
+                    batch.set(window.doc(window.db, "userStats", window.currentUser.uid), localStats, { merge: true });
+                    await batch.commit();
+                } else {
+                    window.saveLocalTasks();
+                }
+            } else if (window.currentUser) {
+                window.setDoc(window.doc(window.db, "userStats", window.currentUser.uid), localStats, { merge: true });
+            }
+            
+            window.renderTasks();
+            if(document.getElementById('tabContentChart_heatmap') && !document.getElementById('tabContentChart_heatmap').classList.contains('hidden')) {
+                window.renderHeatmap();
+            }
+        };
+
+        const originalRenderTasks = window.renderTasks;
         window.renderTasks = function() {
             const list = document.getElementById('taskList');
             list.innerHTML = '';
             
             const sortedTasks = [...window.tasks].sort((a, b) => (a.order || 0) - (b.order || 0));
-            
+            const todayObj = new Date();
+            const todayStr = todayObj.getFullYear() + '-' + String(todayObj.getMonth()+1).padStart(2, '0') + '-' + String(todayObj.getDate()).padStart(2, '0');
+
             sortedTasks.forEach(task => {
                 const cat = categories.find(c => c.id === task.categoryId) || categories[4];
+                
+                let dateBadge = '';
+                if (task.dueDate) {
+                    const isOverdue = task.dueDate < todayStr;
+                    const colorClass = isOverdue ? 'text-red-500 font-bold' : 'opacity-70';
+                    dateBadge = `<div class="text-[10px] ${colorClass} flex items-center gap-1 mt-0.5"><i class="ph ph-calendar-blank"></i> ${task.dueDate}</div>`;
+                }
+
                 const li = document.createElement('li');
                 li.className = `task-item flex items-center justify-between p-2 rounded-lg bg-themeBg border border-gray-400/20 group hover:bg-gray-400/10 transition ${task.completed ? 'opacity-50' : ''}`;
                 li.dataset.id = task.id; 
@@ -972,7 +1768,10 @@
                         <button onclick="toggleTaskCompletion('${task.id}', ${task.completed}); event.stopPropagation();" class="flex-shrink-0 w-5 h-5 sm:w-6 sm:h-6 rounded-full border-2 border-themePrimary flex items-center justify-center text-themeBg ${task.completed ? 'bg-themePrimary' : ''}">
                             ${task.completed ? '<i class="ph ph-check text-xs sm:text-sm font-bold"></i>' : ''}
                         </button>
-                        <span class="truncate cursor-pointer flex-1 py-1 text-sm sm:text-base ${task.completed ? 'line-through' : ''}" onclick="setActiveTask('${task.title}', '${task.categoryId}')">${task.title}</span>
+                        <div class="flex-1 overflow-hidden cursor-pointer py-1" onclick="setActiveTask('${task.title}', '${task.categoryId}')">
+                            <div class="truncate text-sm sm:text-base ${task.completed ? 'line-through opacity-70' : ''}">${task.title}</div>
+                            ${dateBadge}
+                        </div>
                     </div>
                     <div class="flex items-center gap-1 sm:gap-2 pr-1">
                         <div class="flex-shrink-0 text-[10px] sm:text-xs px-1 sm:px-2 py-0.5 sm:py-1 rounded border border-gray-400/30 flex items-center gap-1">
@@ -988,71 +1787,314 @@
 
             if (taskSortableInstance) taskSortableInstance.destroy();
             taskSortableInstance = Sortable.create(list, {
-                handle: '.task-drag-handle', 
-                animation: 150,
+                handle: '.task-drag-handle', animation: 150,
                 onEnd: async (evt) => {
-                    const itemEl = evt.item;
-                    const newIndex = evt.newIndex;
-                    
                     const items = Array.from(list.children);
                     const updatedTasks = items.map((li, index) => {
                         const t = window.tasks.find(task => task.id === li.dataset.id);
-                        t.order = index; 
-                        return t;
+                        t.order = index; return t;
                     });
-                    
-                    if (window.updateTasksOrder) {
-                        await window.updateTasksOrder(updatedTasks);
-                    }
+                    if (window.updateTasksOrder) await window.updateTasksOrder(updatedTasks);
                 }
             });
         }
 
+        // タイマー拡張ロジック
         let timerInterval;
-        let timeLeft = 25 * 60; 
-        let isRunning = false;
+        window.isRunning = false; 
+        window.timerMode = 'focus';
+        
+        let timerSettings = JSON.parse(localStorage.getItem('workside_timer_settings')) || {
+            focusTime: 25, breakTime: 5, autoBreak: false, autoFocus: false,
+            alarmSound: 'bell', alarmVolume: 0.5, activeFontIndex: 0
+        };
+        if (typeof timerSettings.activeFontIndex === 'undefined') timerSettings.activeFontIndex = 0;
+
+        let timeLeft = timerSettings.focusTime * 60;
+        const alarmAudio = new Audio();
+
+        let customAlarmData = { url: '', name: '' };
+        let customFontData = [
+            { url: '', name: '' },
+            { url: '', name: '' },
+            { url: '', name: '' }
+        ];
+
+        async function initTimerSystem() {
+            const alarmFile = await localforage.getItem('custom_alarm_file');
+            if (alarmFile) {
+                customAlarmData.url = URL.createObjectURL(alarmFile);
+                customAlarmData.name = alarmFile.name;
+            }
+
+            for (let i = 0; i < 3; i++) {
+                const fontFile = await localforage.getItem(`custom_font_${i+1}`);
+                if (fontFile) {
+                    customFontData[i].url = URL.createObjectURL(fontFile);
+                    customFontData[i].name = fontFile.name;
+                }
+            }
+            
+            applyTimerFonts();
+            updateTimerUIState();
+            updateTimerDisplay();
+        }
+
+        function applyTimerFonts() {
+            const style = document.getElementById('customTimerFonts') || document.createElement('style');
+            style.id = 'customTimerFonts';
+            let css = '';
+            customFontData.forEach((font, i) => {
+                if(font.url) css += `@font-face { font-family: 'CustomTimerFont${i+1}'; src: url('${font.url}'); }\n`;
+            });
+            style.innerHTML = css;
+            if (!document.getElementById('customTimerFonts')) document.head.appendChild(style);
+
+            const display = document.getElementById('timerDisplay');
+            if (timerSettings.activeFontIndex === 0 || !customFontData[timerSettings.activeFontIndex - 1].url) {
+                display.style.fontFamily = '';
+            } else {
+                display.style.fontFamily = `CustomTimerFont${timerSettings.activeFontIndex}, monospace`;
+            }
+        }
+
+        window.changeActiveFont = function(index) {
+            timerSettings.activeFontIndex = index;
+            localStorage.setItem('workside_timer_settings', JSON.stringify(timerSettings));
+            applyTimerFonts();
+        }
+
+        window.handleCustomFontFile = async function(event, index) {
+            const file = event.target.files[0];
+            if (!file) return;
+            await localforage.setItem(`custom_font_${index+1}`, file);
+            if(customFontData[index].url) URL.revokeObjectURL(customFontData[index].url);
+            customFontData[index].url = URL.createObjectURL(file);
+            customFontData[index].name = file.name;
+            updateFontUILabel(index);
+            applyTimerFonts();
+        }
+
+        window.clearCustomFont = async function(index) {
+            await localforage.removeItem(`custom_font_${index+1}`);
+            if(customFontData[index].url) URL.revokeObjectURL(customFontData[index].url);
+            customFontData[index].url = '';
+            customFontData[index].name = '';
+            updateFontUILabel(index);
+            if (timerSettings.activeFontIndex === index + 1) {
+                document.getElementById('fontSelect_0').checked = true;
+                changeActiveFont(0);
+            } else {
+                applyTimerFonts();
+            }
+        }
+
+        function updateFontUILabel(index) {
+            const label = document.getElementById(`customFontLabel_${index}`);
+            if(!label) return;
+            if (customFontData[index].name) {
+                label.innerHTML = `<i class="ph ph-text-aa"></i> ${customFontData[index].name}<input type="file" accept=".ttf,.otf,.woff,.woff2" class="hidden" onchange="handleCustomFontFile(event, ${index})">`;
+            } else {
+                label.innerHTML = `フォント${index+1}を選択...<input type="file" accept=".ttf,.otf,.woff,.woff2" class="hidden" onchange="handleCustomFontFile(event, ${index})">`;
+            }
+        }
+
+        window.handleCustomAlarmFile = async function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            await localforage.setItem('custom_alarm_file', file);
+            if(customAlarmData.url) URL.revokeObjectURL(customAlarmData.url);
+            customAlarmData.url = URL.createObjectURL(file);
+            customAlarmData.name = file.name;
+            updateAlarmUILabel();
+            previewAlarm();
+        }
+
+        window.clearCustomAlarm = async function() {
+            await localforage.removeItem('custom_alarm_file');
+            if(customAlarmData.url) URL.revokeObjectURL(customAlarmData.url);
+            customAlarmData.url = '';
+            customAlarmData.name = '';
+            updateAlarmUILabel();
+        }
+
+        function updateAlarmUILabel() {
+            const label = document.getElementById('customAlarmFileLabel');
+            if(!label) return;
+            if (customAlarmData.name) {
+                label.innerHTML = `<i class="ph ph-file-audio"></i> ${customAlarmData.name}<input type="file" accept="audio/*" class="hidden" onchange="handleCustomAlarmFile(event)">`;
+            } else {
+                label.innerHTML = `ファイルを選択...<input type="file" accept="audio/*" class="hidden" onchange="handleCustomAlarmFile(event)">`;
+            }
+        }
+
+        function openTimerSettings() {
+            document.getElementById('settingFocusTime').value = timerSettings.focusTime;
+            document.getElementById('settingBreakTime').value = timerSettings.breakTime;
+            document.getElementById('settingAutoBreak').checked = timerSettings.autoBreak;
+            document.getElementById('settingAutoFocus').checked = timerSettings.autoFocus;
+            document.getElementById('settingAlarmSound').value = timerSettings.alarmSound;
+            document.getElementById('settingAlarmVol').value = timerSettings.alarmVolume;
+
+            const radio = document.getElementById(`fontSelect_${timerSettings.activeFontIndex}`);
+            if (radio) radio.checked = true;
+
+            updateAlarmUILabel();
+            updateFontUILabel(0);
+            updateFontUILabel(1);
+            updateFontUILabel(2);
+
+            const maxTime = window.timerMode === 'focus' ? timerSettings.focusTime * 60 : timerSettings.breakTime * 60;
+            const isReset = !window.isRunning && (timeLeft === maxTime);
+            
+            document.getElementById('settingFocusTime').disabled = !isReset;
+            document.getElementById('settingBreakTime').disabled = !isReset;
+            document.getElementById('timerSettingWarning').style.display = isReset ? 'none' : 'block';
+            
+            document.getElementById('customAlarmWrapper').style.display = timerSettings.alarmSound === 'custom' ? 'flex' : 'none';
+            document.getElementById('timerSettingsModal').classList.remove('hidden');
+        }
+
+        function closeTimerSettings() { document.getElementById('timerSettingsModal').classList.add('hidden'); }
+
+        window.saveTimerSettings = function() {
+            const maxTime = window.timerMode === 'focus' ? timerSettings.focusTime * 60 : timerSettings.breakTime * 60;
+            const isReset = !window.isRunning && (timeLeft === maxTime);
+            
+            if (isReset) {
+                timerSettings.focusTime = parseInt(document.getElementById('settingFocusTime').value) || 25;
+                timerSettings.breakTime = parseInt(document.getElementById('settingBreakTime').value) || 5;
+                timeLeft = window.timerMode === 'focus' ? timerSettings.focusTime * 60 : timerSettings.breakTime * 60;
+                updateTimerDisplay();
+            }
+            
+            timerSettings.autoBreak = document.getElementById('settingAutoBreak').checked;
+            timerSettings.autoFocus = document.getElementById('settingAutoFocus').checked;
+            timerSettings.alarmSound = document.getElementById('settingAlarmSound').value;
+            timerSettings.alarmVolume = parseFloat(document.getElementById('settingAlarmVol').value);
+
+            document.getElementById('customAlarmWrapper').style.display = timerSettings.alarmSound === 'custom' ? 'flex' : 'none';
+            localStorage.setItem('workside_timer_settings', JSON.stringify(timerSettings));
+        }
+
+        window.previewAlarm = function() {
+            let src = '';
+            
+            // カスタム音が選ばれており、ファイルがセットされている場合
+            if (timerSettings.alarmSound === 'custom' && customAlarmData.url) {
+                src = customAlarmData.url;
+            } 
+            // プリセットのアラーム音が選ばれている場合
+            else if (timerSettings.alarmSound !== 'custom') {
+                if (timerSettings.alarmSound === 'alarm1') {
+                    src = './audio/alarms/universfield-ringtone-036-485902.mp3';
+                } else if (timerSettings.alarmSound === 'alarm2') {
+                    src = './audio/alarms/universfield-ringtone-087-496415.mp3';
+                } else if (timerSettings.alarmSound === 'alarm3') {
+                    src = './audio/alarms/universfield-ringtone-091-496417.mp3';
+                }
+            }
+            
+            if(src) {
+                alarmAudio.src = src;
+                alarmAudio.volume = timerSettings.alarmVolume;
+                alarmAudio.play().catch(e => console.warn("プレビュー再生エラー: ファイルが見つからないかパスが不正です", e));
+            }
+        }
+
+        function playTimerAlarm() {
+            previewAlarm();
+        }
+
         function formatTime(seconds) {
             const m = Math.floor(seconds / 60).toString().padStart(2, '0');
             const s = (seconds % 60).toString().padStart(2, '0');
             return `${m}:${s}`;
         }
-        function updateTimerDisplay() {
-            document.getElementById('timerDisplay').textContent = formatTime(timeLeft);
-            document.title = `${formatTime(timeLeft)} - Workside`;
+
+        function updateTimerUIState() {
+            const label = document.getElementById('timerModeLabel');
+            if (window.timerMode === 'focus') {
+                label.textContent = "集中";
+                label.className = "text-xs font-bold px-3 py-1 rounded-full bg-themePrimary/10 text-themePrimary mb-2 border border-themePrimary/20";
+            } else {
+                label.textContent = "休憩";
+                label.className = "text-xs font-bold px-3 py-1 rounded-full bg-green-500/10 text-green-600 mb-2 border border-green-500/20";
+            }
         }
-        function toggleTimer() {
+
+        function updateTimerDisplay() {
+            const timeStr = formatTime(timeLeft);
+            if (!document.hidden) {
+                document.getElementById('timerDisplay').textContent = timeStr;
+            }
+            if (window.isRunning) {
+                document.title = `${timeStr} - ${window.timerMode === 'focus' ? '集中' : '休憩'} | Workside`;
+            } else {
+                document.title = "Workside - 音楽とポッドキャストで集中できる学習・タスク管理ツール";
+            }
+        }
+
+        window.toggleTimer = function() {
             const icon = document.getElementById('playPauseIcon');
-            if (isRunning) {
+            if (window.isRunning) {
                 clearInterval(timerInterval);
                 icon.className = "ph ph-play text-2xl sm:text-3xl";
-                isRunning = false;
+                window.isRunning = false;
+                updateTimerDisplay(); 
             } else {
                 icon.className = "ph ph-pause text-2xl sm:text-3xl";
-                isRunning = true;
+                window.isRunning = true;
+                updateTimerDisplay(); 
                 timerInterval = setInterval(() => {
                     if (timeLeft > 0) { 
                         timeLeft--; 
                         updateTimerDisplay(); 
                     } else { 
                         clearInterval(timerInterval); 
-                        isRunning = false; 
+                        window.isRunning = false; 
                         icon.className = "ph ph-play text-2xl sm:text-3xl"; 
-                        if (window.saveStudyLog) window.saveStudyLog(25, window.currentActiveCategoryId);
-                        alert("25分経過！学習を記録しました。"); 
-                        resetTimer(); 
+                        
+                        playTimerAlarm();
+
+                        if (window.timerMode === 'focus') {
+                            if (window.saveStudyLog) window.saveStudyLog(timerSettings.focusTime, window.currentActiveCategoryId);
+                            window.timerMode = 'break';
+                            timeLeft = timerSettings.breakTime * 60;
+                            updateTimerUIState();
+                            updateTimerDisplay();
+                            if (timerSettings.autoBreak) window.toggleTimer();
+                        } else {
+                            window.timerMode = 'focus';
+                            timeLeft = timerSettings.focusTime * 60;
+                            updateTimerUIState();
+                            updateTimerDisplay();
+                            if (timerSettings.autoFocus) window.toggleTimer();
+                        }
                     }
                 }, 1000);
             }
         }
-        function resetTimer() {
+
+        window.resetTimer = function() {
             clearInterval(timerInterval);
-            isRunning = false;
+            window.isRunning = false;
+            window.timerMode = 'focus';
+            updateTimerUIState();
             document.getElementById('playPauseIcon').className = "ph ph-play text-2xl sm:text-3xl";
-            timeLeft = 25 * 60;
+            timeLeft = timerSettings.focusTime * 60;
             updateTimerDisplay();
-            document.title = "学習・タスク管理ツール";
         }
 
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) document.getElementById('timerDisplay').textContent = formatTime(timeLeft);
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initTimerSystem();
+        });
+
+        // チャート拡張ロジック
         window.addEventListener('DOMContentLoaded', () => {
             const ctx = document.getElementById('studyChart').getContext('2d');
             const textColor = getComputedStyle(document.documentElement).getPropertyValue('--text-color').trim();
@@ -1061,8 +2103,7 @@
                 type: 'bar',
                 data: { labels: [], datasets: [] },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
+                    responsive: true, maintainAspectRatio: false,
                     scales: {
                         x: { stacked: true, ticks: { color: textColor }, grid: { color: 'rgba(156, 163, 175, 0.2)' } },
                         y: { stacked: true, beginAtZero: true, title: { display: true, text: '学習時間 (分)', color: textColor }, ticks: { color: textColor }, grid: { color: 'rgba(156, 163, 175, 0.2)' } }
@@ -1074,36 +2115,24 @@
 
         window.updateChart = function() {
             if (!window.studyChartInstance) return;
-            
             const labels = [];
             const dataMap = {};
             categories.forEach(c => dataMap[c.id] = [0,0,0,0,0,0,0]);
-
             const today = new Date();
             for(let i=6; i>=0; i--) {
                 const d = new Date(today);
                 d.setDate(today.getDate() - i);
                 labels.push(`${d.getMonth()+1}/${d.getDate()}`);
             }
-
             window.studyLogs.forEach(log => {
                 const logDate = log.createdAt.toDate ? log.createdAt.toDate() : new Date(log.createdAt);
                 const logLabel = `${logDate.getMonth()+1}/${logDate.getDate()}`;
                 const idx = labels.indexOf(logLabel);
-                
                 if (idx !== -1 && dataMap[log.categoryId]) {
                     dataMap[log.categoryId][idx] += log.duration;
                 }
             });
-
-            const datasets = categories.map(cat => ({
-                label: cat.name,
-                data: dataMap[cat.id],
-                backgroundColor: cat.color,
-                borderWidth: 0,
-                borderRadius: 4
-            }));
-
+            const datasets = categories.map(cat => ({ label: cat.name, data: dataMap[cat.id], backgroundColor: cat.color, borderWidth: 0, borderRadius: 4 }));
             window.studyChartInstance.data.labels = labels;
             window.studyChartInstance.data.datasets = datasets;
             
@@ -1112,7 +2141,6 @@
             window.studyChartInstance.options.scales.y.ticks.color = textColor;
             window.studyChartInstance.options.scales.y.title.color = textColor;
             window.studyChartInstance.options.plugins.legend.labels.color = textColor;
-
             window.studyChartInstance.update();
         }
     </script>
@@ -1120,6 +2148,7 @@
     <!-- オーディオロジック -->
     <script>
         function switchAudioTab(tabId) {
+            window.activeAudioContext = tabId; // PiP用にアクティブなタブを記憶
             ['local', 'spotify', 'podcast'].forEach(id => {
                 const btn = document.getElementById(`tabBtn_${id}`);
                 const content = document.getElementById(`tabContent_${id}`);
@@ -1144,17 +2173,45 @@
         const dropZone = document.getElementById('dropZone');
 
         let playlists = { 'default': [] };
-        let currentPlaylistId = 'default';
+        const IMMUTABLE_PLAYLIST_NAME = "Lo-fi (公式)";
+        
+        // ハードコードされたLo-fi音楽リスト
+        const STATIC_LOFI_FILES = [
+            { id: 'lofi-01', name: 'Night Walking', url: './audio/lofi/Night Walking.mp3' },
+            { id: 'lofi-02', name: 'Yawn', url: './audio/lofi/Yawn.mp3' },
+            { id: 'lofi-03', name: 'Land', url: './audio/lofi/Land.mp3' },
+            { id: 'lofi-04', name: 'Relief', url: './audio/lofi/Relief.mp3' },
+            { id: 'lofi-05', name: 'Stroll', url: './audio/lofi/Stroll.mp3' },
+            { id: 'lofi-06', name: 'Fire', url: './audio/lofi/Fire.mp3' },
+            { id: 'lofi-07', name: 'Drop', url: './audio/lofi/Drop.mp3' },
+            { id: 'lofi-08', name: 'Glass', url: './audio/lofi/Glass.mp3' },
+            { id: 'lofi-09', name: 'Low', url: './audio/lofi/Low.mp3' },
+            { id: 'lofi-10', name: 'Camera', url: './audio/lofi/Camera.mp3' },
+            { id: 'lofi-11', name: 'Notion', url: './audio/lofi/Notion.mp3' },
+            { id: 'lofi-12', name: 'Cozy', url: './audio/lofi/Cozy.mp3' },
+            { id: 'lofi-13', name: 'Epoch', url: './audio/lofi/Epoch.mp3' },
+            { id: 'lofi-14', name: 'Woozy', url: './audio/lofi/Woozy.mp3' }
+        ];
+
+        let currentPlaylistId = IMMUTABLE_PLAYLIST_NAME;
         let currentTrackIndex = -1;
         let playMode = 0; 
         const playModeIcons = ['ph-arrow-right', 'ph-repeat', 'ph-repeat-once', 'ph-shuffle'];
         const playModeTitles = ['ノーマル再生', '全曲ループ', '1曲ループ', 'シャッフル'];
+
+        window.audioPlayer = audioPlayer; // PiP側で参照するため昇格
 
         localforage.config({ name: 'WorksideAudioApp', storeName: 'playlists' });
 
         async function initLocalAudio() {
             const savedData = await localforage.getItem('user_playlists');
             if (savedData) playlists = savedData;
+            
+            // 静的に定義したLo-fiプレイリストを上書き・強制追加
+            playlists[IMMUTABLE_PLAYLIST_NAME] = STATIC_LOFI_FILES;
+
+            if (!playlists[currentPlaylistId]) currentPlaylistId = IMMUTABLE_PLAYLIST_NAME;
+
             updatePlaylistSelector();
             renderTrackList();
             setupDragAndDrop();
@@ -1170,6 +2227,7 @@
                 if(id === currentPlaylistId) opt.selected = true;
                 selector.appendChild(opt);
             }
+            toggleImmutableUI();
         }
 
         async function createNewPlaylist() {
@@ -1185,15 +2243,23 @@
 
         function changePlaylist() {
             currentPlaylistId = document.getElementById('playlistSelector').value;
+            toggleImmutableUI();
             renderTrackList();
             resetPlayerUI();
         }
 
+        function toggleImmutableUI() {
+            const isImmutable = currentPlaylistId === IMMUTABLE_PLAYLIST_NAME;
+            document.getElementById('dropZone').style.display = isImmutable ? 'none' : 'flex';
+            document.getElementById('btnDeletePlaylist').style.display = isImmutable ? 'none' : 'flex';
+        }
+
         async function deleteCurrentPlaylist() {
             if (currentPlaylistId === 'default') return alert("デフォルトプレイリストは削除できません");
+            if (currentPlaylistId === IMMUTABLE_PLAYLIST_NAME) return;
             if (confirm(`「${currentPlaylistId}」を削除しますか？`)) {
                 delete playlists[currentPlaylistId];
-                currentPlaylistId = 'default';
+                currentPlaylistId = IMMUTABLE_PLAYLIST_NAME;
                 await savePlaylists();
                 updatePlaylistSelector();
                 renderTrackList();
@@ -1201,7 +2267,11 @@
             }
         }
 
-        async function savePlaylists() { await localforage.setItem('user_playlists', playlists); }
+        async function savePlaylists() { 
+            const toSave = { ...playlists };
+            delete toSave[IMMUTABLE_PLAYLIST_NAME];
+            await localforage.setItem('user_playlists', toSave); 
+        }
 
         function setupDragAndDrop() {
             dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-themePrimary', 'bg-themePrimary/10'); });
@@ -1215,6 +2285,7 @@
         }
 
         async function processFiles(fileList) {
+            if (currentPlaylistId === IMMUTABLE_PLAYLIST_NAME) return;
             const files = Array.from(fileList).filter(f => f.type.startsWith('audio/'));
             if (files.length === 0) return;
             for (const file of files) {
@@ -1228,38 +2299,45 @@
         function renderTrackList() {
             trackListEl.innerHTML = '';
             const tracks = playlists[currentPlaylistId];
-            if (tracks.length === 0) {
-                trackListEl.innerHTML = '<li class="p-3 text-center opacity-50 text-xs">曲が追加されていません</li>';
+            const isImmutable = currentPlaylistId === IMMUTABLE_PLAYLIST_NAME;
+
+            if (!tracks || tracks.length === 0) {
+                trackListEl.innerHTML = '<li class="p-3 text-center opacity-50 text-xs">曲がありません</li>';
                 return;
             }
             tracks.forEach((track, index) => {
                 const li = document.createElement('li');
                 li.className = `p-2 sm:p-3 flex justify-between items-center group cursor-pointer hover:bg-gray-400/10 ${index === currentTrackIndex ? 'bg-themePrimary/10 text-themePrimary font-medium' : ''}`;
+                
                 li.innerHTML = `
-                    <div class="flex items-center gap-2 overflow-hidden flex-1" onclick="loadTrack(${index}); toggleAudio(true);">
-                        <i class="ph ph-list drag-handle cursor-grab opacity-30 hover:opacity-100 text-lg"></i>
+                    <div class="flex items-center gap-2 overflow-hidden flex-1" onclick="loadTrack(${index}); window.toggleAudio(true);">
+                        ${isImmutable ? '<i class="ph ph-music-note text-lg opacity-50"></i>' : '<i class="ph ph-list drag-handle cursor-grab opacity-30 hover:opacity-100 text-lg"></i>'}
                         <span class="truncate">${track.name}</span>
                     </div>
-                    <button onclick="removeTrack(${index})" class="opacity-0 group-hover:opacity-100 text-red-500 hover:bg-red-500/20 p-1 rounded transition"><i class="ph ph-x"></i></button>
+                    ${isImmutable ? '' : `<button onclick="removeTrack(${index})" class="opacity-0 group-hover:opacity-100 text-red-500 hover:bg-red-500/20 p-1 rounded transition"><i class="ph ph-x"></i></button>`}
                 `;
                 trackListEl.appendChild(li);
             });
-            Sortable.create(trackListEl, {
-                handle: '.drag-handle',
-                animation: 150,
-                onEnd: async (evt) => {
-                    const movedItem = tracks.splice(evt.oldIndex, 1)[0];
-                    tracks.splice(evt.newIndex, 0, movedItem);
-                    if (currentTrackIndex === evt.oldIndex) currentTrackIndex = evt.newIndex;
-                    else if (currentTrackIndex > evt.oldIndex && currentTrackIndex <= evt.newIndex) currentTrackIndex--;
-                    else if (currentTrackIndex < evt.oldIndex && currentTrackIndex >= evt.newIndex) currentTrackIndex++;
-                    await savePlaylists();
-                    renderTrackList();
-                }
-            });
+
+            if (!isImmutable) {
+                Sortable.create(trackListEl, {
+                    handle: '.drag-handle',
+                    animation: 150,
+                    onEnd: async (evt) => {
+                        const movedItem = tracks.splice(evt.oldIndex, 1)[0];
+                        tracks.splice(evt.newIndex, 0, movedItem);
+                        if (currentTrackIndex === evt.oldIndex) currentTrackIndex = evt.newIndex;
+                        else if (currentTrackIndex > evt.oldIndex && currentTrackIndex <= evt.newIndex) currentTrackIndex--;
+                        else if (currentTrackIndex < evt.oldIndex && currentTrackIndex >= evt.newIndex) currentTrackIndex++;
+                        await savePlaylists();
+                        renderTrackList();
+                    }
+                });
+            }
         }
 
         async function removeTrack(index) {
+            if (currentPlaylistId === IMMUTABLE_PLAYLIST_NAME) return;
             playlists[currentPlaylistId].splice(index, 1);
             if (index === currentTrackIndex) resetPlayerUI();
             else if (index < currentTrackIndex) currentTrackIndex--;
@@ -1268,12 +2346,22 @@
         }
 
         function loadTrack(index) {
+            window.activeAudioContext = 'local';
             const tracks = playlists[currentPlaylistId];
             if (!tracks || tracks.length === 0 || index >= tracks.length || index < 0) return;
             currentTrackIndex = index;
             const track = tracks[index];
-            if (audioPlayer.src) URL.revokeObjectURL(audioPlayer.src);
-            audioPlayer.src = URL.createObjectURL(track.data);
+            
+            if (audioPlayer.src && audioPlayer.src.startsWith('blob:')) {
+                URL.revokeObjectURL(audioPlayer.src);
+            }
+            
+            if (track.url) {
+                audioPlayer.src = track.url;
+            } else if (track.data) {
+                audioPlayer.src = URL.createObjectURL(track.data);
+            }
+            
             document.getElementById('audioFileName').textContent = track.name;
             document.getElementById('btnPlayAudio').disabled = false;
             document.getElementById('btnPrevTrack').disabled = false;
@@ -1285,6 +2373,7 @@
 
         function resetPlayerUI() {
             audioPlayer.pause();
+            if (audioPlayer.src && audioPlayer.src.startsWith('blob:')) URL.revokeObjectURL(audioPlayer.src);
             audioPlayer.src = '';
             currentTrackIndex = -1;
             document.getElementById('audioFileName').textContent = "再生中の曲はありません";
@@ -1296,13 +2385,15 @@
             playIcon.className = "ph ph-play text-xl";
         }
 
-        function toggleAudio(forcePlay = false) {
+        window.toggleAudio = function(forcePlay = false) {
+            window.activeAudioContext = 'local';
             if (!audioPlayer.src) return;
             if (audioPlayer.paused || forcePlay) { audioPlayer.play(); playIcon.className = "ph ph-pause text-xl"; } 
             else { audioPlayer.pause(); playIcon.className = "ph ph-play text-xl"; }
         }
 
-        function playNextTrack() {
+        window.playNextTrack = function() {
+            window.activeAudioContext = 'local';
             const tracks = playlists[currentPlaylistId];
             if (tracks.length === 0) return;
             let nextIndex = currentTrackIndex;
@@ -1315,16 +2406,17 @@
                 }
             }
             loadTrack(nextIndex);
-            toggleAudio(true);
+            window.toggleAudio(true);
         }
 
-        function playPrevTrack() {
+        window.playPrevTrack = function() {
+            window.activeAudioContext = 'local';
             if (audioPlayer.currentTime > 3) audioPlayer.currentTime = 0;
             else {
                 let prevIndex = currentTrackIndex - 1;
                 if (prevIndex < 0) prevIndex = playlists[currentPlaylistId].length - 1;
                 loadTrack(prevIndex);
-                toggleAudio(true);
+                window.toggleAudio(true);
             }
         }
 
@@ -1353,7 +2445,7 @@
 
         audioPlayer.addEventListener('ended', () => {
             if (playMode === 2) { audioPlayer.currentTime = 0; audioPlayer.play(); } 
-            else { playIcon.className = "ph ph-play text-xl"; playNextTrack(); }
+            else { playIcon.className = "ph ph-play text-xl"; window.playNextTrack(); }
         });
 
         function seekAudio() {
@@ -1361,8 +2453,9 @@
             currentTimeDisplay.textContent = formatAudioTime(audioPlayer.currentTime);
         }
 
-        function changeAudioSpeed() { audioPlayer.playbackRate = parseFloat(document.getElementById('audioSpeed').value); }
-        function changeLocalVolume() { audioPlayer.volume = parseFloat(document.getElementById('localVolume').value); }
+        window.changeAudioSpeed = function() { audioPlayer.playbackRate = parseFloat(document.getElementById('audioSpeed').value); }
+        window.changeLocalVolume = function() { audioPlayer.volume = parseFloat(document.getElementById('localVolume').value); }
+        
         function formatAudioTime(seconds) {
             if (isNaN(seconds)) return "00:00";
             const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -1436,6 +2529,9 @@
                     document.getElementById('sp-track-name').textContent = state.track_window.current_track.name;
                     document.getElementById('sp-artist-name').textContent = state.track_window.current_track.artists[0].name;
                     document.getElementById('sp-play-icon').className = state.paused ? "ph ph-play text-xl" : "ph ph-pause text-xl";
+                    
+                    window.spotifyIsPaused = state.paused;
+                    window.spotifyTrackName = state.track_window.current_track.name;
                 });
                 spotifyPlayer.addListener('ready', ({ device_id }) => { document.getElementById('sp-device-status').textContent = "接続完了: スマホ等から「Workside Web Player」を選択してください"; });
                 spotifyPlayer.addListener('initialization_error', ({ message }) => console.error(message));
@@ -1447,10 +2543,21 @@
             }
         }
 
-        function toggleSpotifyPlay() { if (spotifyPlayer) spotifyPlayer.togglePlay(); }
-        function nextSpotifyTrack() { if (spotifyPlayer) spotifyPlayer.nextTrack(); }
-        function prevSpotifyTrack() { if (spotifyPlayer) spotifyPlayer.previousTrack(); }
-        function changeSpotifyVolume() { if (spotifyPlayer) spotifyPlayer.setVolume(parseFloat(document.getElementById('spotifyVolume').value)); }
+        window.toggleSpotifyPlay = function() { 
+            window.activeAudioContext = 'spotify';
+            if (spotifyPlayer) spotifyPlayer.togglePlay(); 
+        }
+        window.nextSpotifyTrack = function() { 
+            window.activeAudioContext = 'spotify';
+            if (spotifyPlayer) spotifyPlayer.nextTrack(); 
+        }
+        window.prevSpotifyTrack = function() { 
+            window.activeAudioContext = 'spotify';
+            if (spotifyPlayer) spotifyPlayer.previousTrack(); 
+        }
+        window.changeSpotifyVolume = function() { 
+            if (spotifyPlayer) spotifyPlayer.setVolume(parseFloat(document.getElementById('spotifyVolume').value)); 
+        }
 
         handleSpotifyRedirect();
 
@@ -1462,8 +2569,9 @@
         const pcDuration = document.getElementById('pc-duration');
         let currentPodcastEpisodes = [];
         let currentPodcastTitle = "";
+        
+        window.podcastAudio = podcastAudio;
 
-        // プレイヤー右下の保存ボタンのアイコン・状態を更新する関数
         window.updatePlayerFavBtn = function() {
             const btn = document.getElementById('pc-player-fav-btn');
             const icon = document.getElementById('pc-player-fav-icon');
@@ -1495,7 +2603,6 @@
             window.togglePodcastFavorite(p.title, p.link, p.podcastTitle, p.pubDate);
         };
 
-        // 履歴モーダル制御
         window.openPodcastHistoryModal = function() {
             document.getElementById('podcastHistoryModal').classList.remove('hidden');
             window.renderPodcastHistoryList();
@@ -1626,7 +2733,6 @@
             if (index !== -1) {
                 window.podcastHistory[index].currentTime = time;
                 window.podcastHistory[index].lastPlayedAt = Date.now();
-                // 順序を一番上に持ってくる
                 const updatedItem = window.podcastHistory.splice(index, 1)[0];
                 window.podcastHistory.unshift(updatedItem);
             } else {
@@ -1701,16 +2807,15 @@
         }
 
         function playSavedPodcastEpisode(title, link, podcastTitle, pubDate) {
-            if (audioPlayer && !audioPlayer.paused) toggleAudio(false);
+            window.activeAudioContext = 'podcast';
+            if (audioPlayer && !audioPlayer.paused) window.toggleAudio(false);
             podcastAudio.src = link;
             document.getElementById('pc-episode-title').textContent = title;
             
             window.currentPlayingPodcast = { title, link, podcastTitle, pubDate };
             
-            // 履歴から再生時間を復元
             let existing = window.podcastHistory.find(h => h.link === link);
             if (existing && existing.currentTime) {
-                // Chromeなどの一部ブラウザではloadedmetadataを待つ必要があるため、イベントリスナー内で設定
                 podcastAudio.dataset.resumeTime = existing.currentTime;
             } else {
                 delete podcastAudio.dataset.resumeTime;
@@ -1728,22 +2833,25 @@
             pcPlayIcon.className = "ph ph-pause text-xl";
         }
 
-        function togglePodcastPlay() {
+        window.togglePodcastPlay = function() {
+            window.activeAudioContext = 'podcast';
             if (!podcastAudio.src) return;
             if (podcastAudio.paused) { podcastAudio.play(); pcPlayIcon.className = "ph ph-pause text-xl"; } 
             else { podcastAudio.pause(); pcPlayIcon.className = "ph ph-play text-xl"; }
         }
-        function skipPodcast(seconds) { podcastAudio.currentTime = Math.min(Math.max(podcastAudio.currentTime + seconds, 0), podcastAudio.duration); }
+        window.skipPodcast = function(seconds) { 
+            window.activeAudioContext = 'podcast';
+            podcastAudio.currentTime = Math.min(Math.max(podcastAudio.currentTime + seconds, 0), podcastAudio.duration); 
+        }
         function seekPodcast() { podcastAudio.currentTime = pcSeekbar.value; }
-        function changePodcastSpeed() { podcastAudio.playbackRate = parseFloat(document.getElementById('pc-speed').value); }
-        function changePodcastVolume() { podcastAudio.volume = parseFloat(document.getElementById('podcastVolume').value); }
+        window.changePodcastSpeed = function() { podcastAudio.playbackRate = parseFloat(document.getElementById('pc-speed').value); }
+        window.changePodcastVolume = function() { podcastAudio.volume = parseFloat(document.getElementById('podcastVolume').value); }
 
         podcastAudio.addEventListener('loadedmetadata', () => {
             pcSeekbar.max = Math.floor(podcastAudio.duration);
             pcDuration.textContent = formatPodcastTime(podcastAudio.duration);
             podcastAudio.playbackRate = parseFloat(document.getElementById('pc-speed').value);
             
-            // 履歴の時間を適用して再開
             if (podcastAudio.dataset.resumeTime) {
                 podcastAudio.currentTime = parseFloat(podcastAudio.dataset.resumeTime);
                 delete podcastAudio.dataset.resumeTime;
@@ -1756,7 +2864,6 @@
                 pcSeekbar.value = Math.floor(podcastAudio.currentTime);
                 pcCurrentTime.textContent = formatPodcastTime(podcastAudio.currentTime);
                 
-                // 5秒ごとに再生位置を履歴として保存
                 const now = Date.now();
                 if (now - podcastSaveInterval > 5000) {
                     window.savePodcastHistoryTime(podcastAudio.currentTime);
@@ -1782,6 +2889,161 @@
             const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
             const s = Math.floor(seconds % 60).toString().padStart(2, '0');
             return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
+        }
+    </script>
+
+    <!-- カレンダー制御ロジック -->
+    <script>
+        let currentCalendarDate = new Date();
+        
+        window.openDatePicker = function() {
+            document.getElementById('datePickerModal').classList.remove('hidden');
+            renderCalendar();
+        };
+
+        window.closeDatePicker = function() {
+            document.getElementById('datePickerModal').classList.add('hidden');
+        };
+
+        window.clearDatePicker = function() {
+            const display = document.getElementById('selectedDueDateText');
+            const btnUI = document.getElementById('datePickerBtn');
+            const iconUI = document.getElementById('calendarIcon');
+
+            display.dataset.date = '';
+            display.textContent = '期限';
+            
+            // ボタンのハイライトを解除
+            if(btnUI) {
+                btnUI.classList.remove('bg-themePrimary/10', 'text-themePrimary', 'border', 'border-themePrimary/30');
+                btnUI.classList.add('bg-gray-400/10', 'opacity-80');
+                iconUI.classList.remove('text-themePrimary');
+            }
+
+            closeDatePicker();
+        };
+
+        window.changeMonth = function(delta) {
+            currentCalendarDate.setMonth(currentCalendarDate.getMonth() + delta);
+            renderCalendar();
+        };
+
+        function renderCalendar() {
+            const year = currentCalendarDate.getFullYear();
+            const month = currentCalendarDate.getMonth();
+            document.getElementById('calendarMonthYear').textContent = `${year}年 ${month + 1}月`;
+
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            
+            const grid = document.getElementById('calendarGrid');
+            grid.innerHTML = '';
+
+            // 現在選択されている日付を取得
+            const selectedDateStr = document.getElementById('selectedDueDateText').dataset.date;
+
+            // 空白セル
+            for (let i = 0; i < firstDay; i++) {
+                grid.innerHTML += `<div></div>`;
+            }
+
+            // 日付セル
+            const today = new Date();
+            const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+            for (let i = 1; i <= daysInMonth; i++) {
+                const currentDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+                const isPast = new Date(year, month, i) < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                const isSelected = currentDateStr === selectedDateStr;
+                const isToday = currentDateStr === todayStr;
+
+                let btnClass = 'transition rounded-full w-6 h-6 sm:w-8 sm:h-8 flex items-center justify-center mx-auto ';
+                
+                if (isPast) {
+                    btnClass += 'opacity-30 cursor-not-allowed';
+                } else if (isSelected) {
+                    btnClass += 'bg-themePrimary text-white shadow-md font-bold'; // 選択中の日付
+                } else if (isToday) {
+                    btnClass += 'border border-themePrimary/50 text-themePrimary font-bold cursor-pointer hover:bg-themePrimary/20'; // 今日の日付
+                } else {
+                    btnClass += 'hover:bg-themePrimary/20 hover:text-themePrimary cursor-pointer'; // 通常の日付
+                }
+                
+                const btn = document.createElement('div');
+                btn.className = btnClass;
+                btn.textContent = i;
+                
+                if (!isPast) {
+                    btn.onclick = () => {
+                        const display = document.getElementById('selectedDueDateText');
+                        const btnUI = document.getElementById('datePickerBtn');
+                        const iconUI = document.getElementById('calendarIcon');
+
+                        display.dataset.date = currentDateStr;
+                        display.textContent = `${month + 1}/${i}`;
+                        
+                        // タスク入力バーのボタンをハイライト状態にする
+                        if(btnUI) {
+                            btnUI.classList.add('bg-themePrimary/10', 'text-themePrimary', 'border', 'border-themePrimary/30');
+                            btnUI.classList.remove('bg-gray-400/10', 'opacity-80');
+                            iconUI.classList.add('text-themePrimary');
+                        }
+                        
+                        // カレンダーを即座に再描画して、タップした日付に色を付ける
+                        renderCalendar();
+                        
+                        // 0.15秒のディレイをかけて閉じる（タップしたフィードバックを視覚的に伝えるため）
+                        setTimeout(() => {
+                            closeDatePicker();
+                        }, 150);
+                    };
+                }
+                grid.appendChild(btn);
+            }
+        }
+    </script>
+
+    <script>
+        // ヒートマップのツールチップ制御
+        window.showTooltip = function(event, date, count, tasks) {
+            const tooltip = document.getElementById('heatmapTooltip');
+            const dateEl = document.getElementById('tooltipDate');
+            const listEl = document.getElementById('tooltipList');
+            
+            dateEl.textContent = `${date} (${count}件完了)`;
+            listEl.innerHTML = '';
+            
+            if (tasks && tasks.length > 0) {
+                tasks.forEach(t => {
+                    const li = document.createElement('li');
+                    li.className = 'truncate opacity-90';
+                    li.innerHTML = `<i class="ph ph-check text-themePrimary"></i> ${t}`;
+                    listEl.appendChild(li);
+                });
+            } else {
+                listEl.innerHTML = '<li class="opacity-50">タスク記録なし</li>';
+            }
+
+            tooltip.classList.remove('hidden');
+            
+            // マウス位置にツールチップを追従させる
+            const x = event.clientX + 15;
+            const y = event.clientY + 15;
+            tooltip.style.left = `${x}px`;
+            tooltip.style.top = `${y}px`;
+        }
+
+        window.moveTooltip = function(event) {
+            const tooltip = document.getElementById('heatmapTooltip');
+            if (tooltip.classList.contains('hidden')) return;
+            const x = event.clientX + 15;
+            const y = event.clientY + 15;
+            tooltip.style.left = `${x}px`;
+            tooltip.style.top = `${y}px`;
+        }
+
+        window.hideTooltip = function() {
+            document.getElementById('heatmapTooltip').classList.add('hidden');
         }
     </script>
 </body>
