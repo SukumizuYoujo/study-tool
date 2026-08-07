@@ -621,14 +621,14 @@
     <div class="flex-1 w-full max-w-3xl mx-auto px-4 py-4 md:px-8 md:py-8 space-y-6 pb-12 sm:space-y-8 sm:pb-24">
         
         <header class="flex justify-between items-center px-1">
-            <a href="index.html" class="text-xl sm:text-2xl font-bold flex items-center gap-2 hover:opacity-70 transition cursor-pointer">
+            <a href="index.html" class="text-xl sm:text-2xl font-bold flex items-center gap-2 hover:opacity-70 transition cursor-pointer flex-shrink-0">
                 <i class="ph ph-kanban"></i> Workside
             </a>
-            <div class="flex gap-2 items-center">
+            <div class="flex gap-1 sm:gap-2 items-center">
                 <button id="authBtn" class="w-9 h-9 sm:w-8 sm:h-8 rounded-full bg-themePrimary text-white flex items-center justify-center border-2 border-transparent transition hover:opacity-80">
                     <i class="ph ph-spinner-gap animate-spin"></i>
                 </button>
-                <div class="w-px h-6 bg-gray-400/30 mx-1"></div>
+                <div class="w-px h-6 bg-gray-400/30 mx-0.5 sm:mx-1"></div>
                 <button onclick="setTheme('light')" class="w-8 h-8 sm:w-6 sm:h-6 rounded-full bg-[#f8fafc] border-2 border-gray-400" title="ライト"></button>
                 <button onclick="setTheme('dark')" class="w-8 h-8 sm:w-6 sm:h-6 rounded-full bg-[#0f172a] border-2 border-gray-400" title="ダーク"></button>
                 <button onclick="openEnvModal()" class="w-8 h-8 sm:w-6 sm:h-6 rounded-full bg-themeSecondary border-2 border-gray-400 flex items-center justify-center text-themeText" title="環境音ミキサー">
