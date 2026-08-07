@@ -439,7 +439,7 @@
         .custom-scrollbar-x::-webkit-scrollbar-thumb:hover { background-color: rgba(156, 163, 175, 0.5); }
     </style>
 </head>
-<body class="min-h-screen p-4 md:p-8 font-sans relative">
+<body class="min-h-screen font-sans relative flex flex-col">
 
     <!-- タイマー設定モーダル -->
     <div id="timerSettingsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity p-4">
@@ -551,7 +551,7 @@
             </div>
             <div class="space-y-4 mb-6" id="envSoundsList">
             </div>
-            <div class="border-t border-gray-400/20 pt-4">
+            <div class="border-t border-white/20 pt-4">
                 <label class="text-xs opacity-80 mb-2 block font-medium">カスタム環境音 (ローカルファイル)</label>
                 <div class="flex gap-2 mb-2">
                     <label class="flex-1 cursor-pointer p-2 rounded bg-themeSecondary border border-gray-400/30 text-xs focus:outline-none focus:ring-1 focus:ring-themePrimary text-center truncate hover:bg-gray-400/10 transition" id="customEnvFileLabel">
@@ -589,7 +589,7 @@
                     <input type="color" id="color-secondary" class="w-12 h-8 cursor-pointer shadow-sm" oninput="updateThemeString()">
                 </div>
             </div>
-            <div class="border-t border-gray-400/20 pt-4 mb-6">
+            <div class="border-t border-white/20 pt-4 mb-6">
                 <label class="text-xs opacity-80 mb-2 block">共有用文字列 (インポート / エクスポート)</label>
                 <div class="flex gap-2">
                     <input type="text" id="themeStringInput" placeholder="例: f8fafc-334155-475569-e2e8f0" class="flex-1 p-2 rounded bg-themeSecondary border border-gray-400/30 text-xs focus:outline-none focus:ring-1 focus:ring-themePrimary font-mono">
@@ -618,12 +618,12 @@
     </div>
 
     <!-- アプリ本体コンテナ -->
-    <div class="max-w-3xl mx-auto space-y-6 pb-20 sm:space-y-8 sm:pb-24">
+    <div class="flex-1 w-full max-w-3xl mx-auto px-4 py-4 md:px-8 md:py-8 space-y-6 pb-12 sm:space-y-8 sm:pb-24">
         
         <header class="flex justify-between items-center px-1">
-            <h1 class="text-xl sm:text-2xl font-bold flex items-center gap-2">
+            <a href="index.html" class="text-xl sm:text-2xl font-bold flex items-center gap-2 hover:opacity-70 transition cursor-pointer">
                 <i class="ph ph-kanban"></i> Workside
-            </h1>
+            </a>
             <div class="flex gap-2 items-center">
                 <button id="authBtn" class="w-8 h-8 rounded-full bg-themePrimary text-white flex items-center justify-center border-2 border-transparent transition hover:opacity-80">
                     <i class="ph ph-spinner-gap animate-spin"></i>
@@ -883,7 +883,7 @@
                         </div>
                         <audio id="podcastAudio" class="hidden"></audio>
 
-                        <div class="pt-4 border-t border-gray-400/20">
+                        <div class="pt-4 border-t border-white/20">
                             <h3 class="text-xs sm:text-sm font-semibold mb-2 flex items-center gap-1"><i class="ph ph-bookmarks"></i> あとで聴く (最大30件)</h3>
                             <div class="bg-themeBg rounded-lg border border-gray-400/20 max-h-48 overflow-y-auto custom-scrollbar">
                                 <ul id="podcastFavList" class="divide-y divide-gray-400/20 text-xs sm:text-sm">
@@ -937,6 +937,39 @@
         </div>
     </div>
 
+    <!-- Footer -->
+    <footer class="bg-themePrimary pt-10 pb-6 mt-auto w-full text-white transition-colors duration-300">
+        <div class="max-w-3xl mx-auto px-4 grid md:grid-cols-3 gap-8 text-sm opacity-80">
+            <div>
+                <div class="text-lg font-bold mb-4 flex items-center gap-2">
+                    <i class="ph ph-kanban"></i> Workside
+                </div>
+                <p class="mb-4 text-xs">音楽とポッドキャストで集中できる<br>学習・タスク管理ツール</p>
+            </div>
+            <div>
+                <h4 class="font-bold mb-4">リンク</h4>
+                <ul class="space-y-2 text-xs">
+                    <li><a href="index.html" class="hover:opacity-70 transition">ホーム</a></li>
+                    <li><a href="guide.html" class="hover:opacity-70 transition">利用ガイド</a></li>
+                    <li><a href="privacy.html" class="hover:opacity-70 transition">プライバシーポリシー</a></li>
+                </ul>
+            </div>
+            <div>
+                <h4 class="font-bold mb-4">クレジット・お問い合わせ</h4>
+                <p class="mb-2 text-xs">公式Lo-fi BGM提供:</p>
+                <p class="mb-4 text-[10px] bg-white/10 p-2 rounded">Music : RYU ITO<br><a href="https://ryu110.com/" target="_blank" class="text-blue-300 hover:underline">https://ryu110.com/</a></p>
+                <p>
+                    <a href="https://docs.google.com/forms/d/e/1FAIpQLSdsp0kQTSGNc9CjM4XteSENjfTXuTrist0EN1uhVCtVrbRJww/viewform" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 hover:opacity-70 transition border border-white/30 px-3 py-1.5 rounded bg-white/10 text-white">
+                        <i class="ph ph-envelope-simple"></i> お問い合わせ
+                    </a>
+                </p>
+            </div>
+        </div>
+        <div class="max-w-3xl mx-auto px-4 pt-8 mt-8 border-t border-white/20 text-center text-xs opacity-50">
+            &copy; 2026 Workside. All rights reserved.
+        </div>
+    </footer>
+
     <!-- カレンダーモーダル -->
     <div id="datePickerModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm transition-opacity p-4">
         <div class="bg-themeBg text-themeText p-6 rounded-xl shadow-xl max-w-[280px] w-full border border-gray-400/20 relative">
@@ -950,7 +983,7 @@
                 <div>日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div>
             </div>
             <div id="calendarGrid" class="grid grid-cols-7 gap-1 text-center text-xs"></div>
-            <div class="mt-4 pt-4 border-t border-gray-400/20 flex justify-end">
+            <div class="mt-4 pt-4 border-t border-white/20 flex justify-end">
                 <button onclick="window.clearDatePicker()" class="text-xs text-red-500 hover:bg-red-500/10 px-3 py-1.5 rounded transition">未設定にする</button>
             </div>
         </div>
@@ -1849,7 +1882,8 @@
             style.id = 'customTimerFonts';
             let css = '';
             customFontData.forEach((font, i) => {
-                if(font.url) css += `@font-face { font-family: 'CustomTimerFont${i+1}'; src: url('${font.url}'); }\n`;
+                if(font.url) css += `@font-face { font-family: 'CustomTimerFont${i+1}'; src: url('${font.url}'); }
+`;
             });
             style.innerHTML = css;
             if (!document.getElementById('customTimerFonts')) document.head.appendChild(style);
