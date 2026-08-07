@@ -11,77 +11,147 @@
     <!-- Header -->
     <header class="bg-white shadow-sm sticky top-0 z-50">
         <div class="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center">
-            <a href="index.html" class="text-xl font-bold flex items-center gap-2 text-slate-700">
-                <i class="ph ph-kanban text-2xl text-slate-600"></i> Workside
+            <a href="index.html" class="text-xl sm:text-2xl font-bold flex items-center gap-2 hover:opacity-70 transition cursor-pointer flex-shrink-0 text-slate-700">
+                <i class="ph ph-kanban text-slate-600"></i> Workside
             </a>
             <nav class="hidden md:flex gap-6 text-sm font-medium text-slate-600">
                 <a href="index.html" class="hover:text-slate-900 transition">ホーム</a>
                 <a href="guide.html" class="text-slate-900 border-b-2 border-slate-600 font-bold">利用ガイド</a>
                 <a href="privacy.html" class="hover:text-slate-900 transition">プライバシーポリシー</a>
             </nav>
-            <a href="app.html" class="px-5 py-2 bg-slate-600 text-white rounded-lg text-sm font-medium hover:bg-slate-700 transition shadow-sm">
-                ツールを開く
-            </a>
+            <div class="flex gap-1 sm:gap-2 items-center">
+                <a href="app.html" class="px-4 py-2 sm:px-5 sm:py-2 bg-slate-600 text-white rounded-lg text-xs sm:text-sm font-medium hover:bg-slate-700 transition shadow-sm whitespace-nowrap">
+                    ツールを開く
+                </a>
+            </div>
         </div>
     </header>
 
-    <main class="flex-1 max-w-4xl mx-auto px-4 py-12">
-        <h1 class="text-3xl font-bold border-b border-slate-200 pb-4 mb-8">Workside 利用ガイド</h1>
+    <main class="flex-1 max-w-4xl mx-auto px-4 py-12 w-full">
+        <h1 class="text-3xl font-bold border-b border-slate-200 pb-4 mb-8 text-slate-800">Workside 利用ガイド</h1>
         
         <div class="space-y-12">
-            <section class="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-                <h2 class="text-2xl font-bold mb-4 flex items-center gap-2 text-slate-700">
-                    <i class="ph ph-list-checks text-green-600"></i> タスク管理（ToDoリスト）の使い方
+            <!-- 1. はじめに -->
+            <section class="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-100">
+                <h2 class="text-xl sm:text-2xl font-bold mb-4 flex items-center gap-2 text-slate-700">
+                    <i class="ph ph-info text-slate-500"></i> はじめに：Worksideでできること
                 </h2>
-                <p class="mb-4 text-slate-600 leading-relaxed">
-                    タスク入力欄に実行したいタスクを入力し、カテゴリ（開発、学校、ランニング等）を選択して追加ボタンを押します。カレンダーアイコンから期限日を設定することも可能です。
+                <p class="text-slate-600 leading-relaxed text-sm sm:text-base">
+                    Worksideは、タスク管理（ToDo）、時間管理（タイマー）、そして集中環境の構築（オーディオ・環境音）を1つの画面で完結させるために作られました。<br>
+                    複数のアプリを行き来することなく、このツールを開くだけでスムーズに「集中モード」に入ることができます。
                 </p>
-                <ul class="list-disc list-inside space-y-2 text-slate-600 ml-4">
-                    <li>タスク左側のグリップアイコンをドラッグすることで並び替えができます。</li>
-                    <li>チェックボタンを押すとタスクが完了状態になります。</li>
-                    <li>タスク名をクリックすると、タイマーパネルにそのタスク名が表示され「今から集中するタスク」として設定できます。</li>
-                </ul>
             </section>
 
-            <section class="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-                <h2 class="text-2xl font-bold mb-4 flex items-center gap-2 text-slate-700">
+            <!-- 2. タスク管理 -->
+            <section class="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-100">
+                <h2 class="text-xl sm:text-2xl font-bold mb-4 flex items-center gap-2 text-slate-700">
+                    <i class="ph ph-list-checks text-green-600"></i> タスク管理（ToDoリスト）
+                </h2>
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="font-bold text-slate-700 mb-2 border-l-4 border-green-500 pl-2">基本操作</h3>
+                        <ul class="list-disc list-inside space-y-1.5 text-slate-600 text-sm sm:text-base ml-2">
+                            <li>入力欄にタスクを書き込み、カテゴリを選択して追加します。カレンダーアイコンから期限の設定も可能です。</li>
+                            <li>タスク左側のグリップアイコン（6つの点）をドラッグして並び替えができます。</li>
+                            <li>タスク名をクリックすると、タイマーパネルにそのタスクがセットされます。</li>
+                        </ul>
+                    </div>
+                    <div class="bg-green-50 p-4 rounded-lg border border-green-100">
+                        <h3 class="font-bold text-green-800 mb-2 flex items-center gap-1"><i class="ph ph-lightbulb"></i> 効果的な使い方（Tips）</h3>
+                        <p class="text-sm text-green-700 leading-relaxed">
+                            <strong>「タスクはできるだけ細かく分解する」</strong>のがモチベーション維持のコツです。「レポート作成」「実装」といった大きなタスクではなく、「構成案を練る」「〇〇の関数を書く」など、<strong>1回のタイマー（25分）で終わるサイズ</strong>に分割して登録すると、達成感を味わいながらテンポ良く作業を進められます。
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 3. Focus Timer -->
+            <section class="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-100">
+                <h2 class="text-xl sm:text-2xl font-bold mb-4 flex items-center gap-2 text-slate-700">
                     <i class="ph ph-timer text-blue-600"></i> Focus Timer（ポモドーロタイマー）
                 </h2>
-                <p class="mb-4 text-slate-600 leading-relaxed">
-                    学習や作業の集中力を高めるためのタイマーです。設定アイコン（歯車）から、集中時間と休憩時間を自由にカスタマイズできます。
-                </p>
-                <ul class="list-disc list-inside space-y-2 text-slate-600 ml-4">
-                    <li>タイマー終了時に自動で休憩・集中へ切り替える設定が可能です。</li>
-                    <li>アラーム音やフォントも自分好みに変更できます。</li>
-                </ul>
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="font-bold text-slate-700 mb-2 border-l-4 border-blue-500 pl-2">基本操作</h3>
+                        <ul class="list-disc list-inside space-y-1.5 text-slate-600 text-sm sm:text-base ml-2">
+                            <li>中央の再生ボタンでタイマーがスタートします。</li>
+                            <li>右下の歯車アイコンから、集中時間・休憩時間の長さ、自動開始のオンオフ、終了時のアラーム音と音量を設定できます。</li>
+                            <li>お好みのフォント（ttf/otfファイル）を読み込ませて、時計のデザインを変更することも可能です。</li>
+                        </ul>
+                    </div>
+                    <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                        <h3 class="font-bold text-blue-800 mb-2 flex items-center gap-1"><i class="ph ph-lightbulb"></i> 効果的な使い方（Tips）</h3>
+                        <p class="text-sm text-blue-700 leading-relaxed mb-3">
+                            当タイマーは、25分の作業と5分の休憩を繰り返す<strong>「ポモドーロ・テクニック」</strong>をベースにしています。短時間で区切ることで脳の疲労を防ぎ、高い集中力を維持できます。
+                        </p>
+                        <p class="text-sm text-blue-700 leading-relaxed">
+                            もしプログラミングや長文の執筆など、深く没頭したい作業の場合は、設定から<strong>「50分集中＋10分休憩」</strong>などにカスタマイズするのもおすすめです。
+                        </p>
+                    </div>
+                </div>
             </section>
 
-            <section class="bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
-                <h2 class="text-2xl font-bold mb-4 flex items-center gap-2 text-slate-700">
-                    <i class="ph ph-speaker-hifi text-purple-600"></i> オーディオ機能・環境音
+            <!-- 4. オーディオ -->
+            <section class="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-100">
+                <h2 class="text-xl sm:text-2xl font-bold mb-4 flex items-center gap-2 text-slate-700">
+                    <i class="ph ph-speaker-hifi text-purple-600"></i> オーディオ・環境音
                 </h2>
-                <p class="mb-4 text-slate-600 leading-relaxed">
-                    Worksideでは3種類のオーディオソースを利用できます。さらに、画面上部の「波線アイコン」から雨やカフェなどの環境音を重ねて再生することも可能です。
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="font-bold text-slate-700 mb-2 border-l-4 border-purple-500 pl-2">基本操作</h3>
+                        <p class="text-slate-600 text-sm sm:text-base mb-2">3種類のオーディオソースと、環境音ミキサーを利用できます。</p>
+                        <ul class="list-disc list-inside space-y-1.5 text-slate-600 text-sm sm:text-base ml-2">
+                            <li><strong>Local</strong>: 公式のLo-fi BGMのほか、ご自身の音楽ファイルをドラッグ＆ドロップして再生できます。</li>
+                            <li><strong>Spotify</strong>: Premiumアカウントでログインすると、アプリ内でSpotifyの楽曲をストリーミング再生できます。</li>
+                            <li><strong>Podcast</strong>: RSSフィードのURLを入力してポッドキャストを読み込みます。「あとで聴く」にお気に入りのエピソードを保存できます。</li>
+                            <li><strong>環境音ミキサー</strong>: 画面上部の波線アイコンから、雨やカフェなどの環境音を重ねて再生できます。</li>
+                        </ul>
+                    </div>
+                    <div class="bg-purple-50 p-4 rounded-lg border border-purple-100">
+                        <h3 class="font-bold text-purple-800 mb-2 flex items-center gap-1"><i class="ph ph-lightbulb"></i> 効果的な使い方（Tips）</h3>
+                        <p class="text-sm text-purple-700 leading-relaxed">
+                            静かすぎる環境は、かえって小さな物音が気になり集中を削ぐ原因になります。雨の音やカフェの雑音といった<strong>「ホワイトノイズ」</strong>を音楽に薄く被せることで、周囲の邪魔な音をかき消す効果があります。<br>
+                            また、単純作業の最中や休憩時間には、Podcastの「あとで聴く」機能を活用してニュースや情報収集にあてるのもスマートな使い方です。
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 5. 便利機能 -->
+            <section class="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-100">
+                <h2 class="text-xl sm:text-2xl font-bold mb-4 flex items-center gap-2 text-slate-700">
+                    <i class="ph ph-chart-bar text-orange-600"></i> 記録とその他の便利機能
+                </h2>
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="font-bold text-slate-700 mb-1">学習記録とヒートマップ</h3>
+                        <p class="text-sm sm:text-base text-slate-600 leading-relaxed">
+                            タイマーで計測した時間や完了したタスクは自動的に記録されます。「タスク完了（ヒートマップ）」では、GitHubの草（コントリビューショングラフ）のように、タスクをこなした日ほど色が濃くなります。「毎日少しでも作業して色を塗る」ことを目標にすると習慣化に繋がります。
+                        </p>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-slate-700 mb-1">ピクチャ・イン・ピクチャ（PiP）機能</h3>
+                        <p class="text-sm sm:text-base text-slate-600 leading-relaxed">
+                            各モジュールの右上にあるPiPアイコンをクリックすると、そのパネル（タイマーやタスク等）が小さな別ウィンドウとして独立します。他のタブでブラウジングしながらでも、常に画面の隅にタイマーを表示させておくことができ非常に便利です。
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 6. データ管理 -->
+            <section class="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-100">
+                <h2 class="text-xl sm:text-2xl font-bold mb-4 flex items-center gap-2 text-slate-700">
+                    <i class="ph ph-cloud-check text-slate-600"></i> データ管理とクラウド同期（重要）
+                </h2>
+                <p class="mb-3 text-slate-600 text-sm sm:text-base leading-relaxed">
+                    Worksideはログインなしでも利用可能ですが、その場合タスクや記録データは<strong>ご利用のブラウザ（ローカルストレージ）</strong>に保存されます。ブラウザのキャッシュをクリアしたり、シークレットモードを使用したりすると<strong>データが消失するおそれ</strong>があります。
                 </p>
-                <div class="space-y-4 ml-4">
-                    <div>
-                        <h3 class="font-bold text-slate-700">1. Local / 公式Lo-fi</h3>
-                        <p class="text-sm text-slate-600">ご自身の端末にある音楽ファイル（mp3等）をドラッグ＆ドロップで再生できます。また、デフォルトで収録されているLo-fiプレイリストもご利用いただけます。</p>
-                        <div class="mt-2 bg-slate-100 p-3 rounded text-xs text-slate-600 border border-slate-200">
-                            <strong>【デフォルトLo-fi BGMのクレジット】</strong><br>
-                            当ツールに収録されているデフォルトのLo-fi楽曲は、以下のクリエイター様より提供されています。<br>
-                            Music : RYU ITO<br>
-                            URL: <a href="https://ryu110.com/" target="_blank" class="text-blue-500 hover:underline">https://ryu110.com/</a>
-                        </div>
-                    </div>
-                    <div>
-                        <h3 class="font-bold text-slate-700">2. Spotify連携</h3>
-                        <p class="text-sm text-slate-600">Spotify Premiumアカウントをお持ちの方は、ログインすることでアプリ内からSpotifyの楽曲をコントロール・再生できます。</p>
-                    </div>
-                    <div>
-                        <h3 class="font-bold text-slate-700">3. Podcast</h3>
-                        <p class="text-sm text-slate-600">お好きなポッドキャストのRSSフィードURLを入力することで、エピソードの取得と再生が可能です。「あとで聴く」機能や視聴履歴機能も搭載しています。</p>
-                    </div>
+                <div class="bg-slate-50 p-4 rounded-lg border border-slate-200 mt-4">
+                    <h3 class="font-bold text-slate-800 mb-2">Googleアカウントでのログイン推奨</h3>
+                    <p class="text-sm text-slate-700 leading-relaxed">
+                        画面右上のユーザーアイコンからGoogleアカウントでログインしていただくと、データがクラウドに自動同期されます。<br>
+                        これにより、<strong>「PCで登録したタスクの続きをスマホで確認する」「ブラウザのキャッシュを消してもデータが復元できる」</strong>といったメリットがあります。大切な作業記録を守るためにも、クラウド同期のご利用を強くお勧めいたします。
+                    </p>
                 </div>
             </section>
         </div>
