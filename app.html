@@ -625,16 +625,16 @@
                 <i class="ph ph-kanban"></i> Workside
             </a>
             <div class="flex gap-2 items-center">
-                <button id="authBtn" class="w-8 h-8 rounded-full bg-themePrimary text-white flex items-center justify-center border-2 border-transparent transition hover:opacity-80">
+                <button id="authBtn" class="w-9 h-9 sm:w-8 sm:h-8 rounded-full bg-themePrimary text-white flex items-center justify-center border-2 border-transparent transition hover:opacity-80">
                     <i class="ph ph-spinner-gap animate-spin"></i>
                 </button>
                 <div class="w-px h-6 bg-gray-400/30 mx-1"></div>
-                <button onclick="setTheme('light')" class="w-6 h-6 rounded-full bg-[#f8fafc] border-2 border-gray-400" title="ライト"></button>
-                <button onclick="setTheme('dark')" class="w-6 h-6 rounded-full bg-[#0f172a] border-2 border-gray-400" title="ダーク"></button>
-                <button onclick="openEnvModal()" class="w-6 h-6 rounded-full bg-themeSecondary border-2 border-gray-400 flex items-center justify-center text-themeText" title="環境音ミキサー">
+                <button onclick="setTheme('light')" class="w-8 h-8 sm:w-6 sm:h-6 rounded-full bg-[#f8fafc] border-2 border-gray-400" title="ライト"></button>
+                <button onclick="setTheme('dark')" class="w-8 h-8 sm:w-6 sm:h-6 rounded-full bg-[#0f172a] border-2 border-gray-400" title="ダーク"></button>
+                <button onclick="openEnvModal()" class="w-8 h-8 sm:w-6 sm:h-6 rounded-full bg-themeSecondary border-2 border-gray-400 flex items-center justify-center text-themeText" title="環境音ミキサー">
                     <i class="ph ph-waves text-[12px]"></i>
                 </button>
-                <button onclick="openThemeModal()" class="w-6 h-6 rounded-full bg-gradient-to-br from-pink-400 via-purple-400 to-blue-400 border-2 border-gray-400 flex items-center justify-center text-white" title="カスタムカラー">
+                <button onclick="openThemeModal()" class="w-8 h-8 sm:w-6 sm:h-6 rounded-full bg-gradient-to-br from-pink-400 via-purple-400 to-blue-400 border-2 border-gray-400 flex items-center justify-center text-white" title="カスタムカラー">
                     <i class="ph ph-palette text-[10px]"></i>
                 </button>
             </div>
@@ -649,10 +649,10 @@
                         <i class="ph ph-list-checks"></i> ToDoリスト
                     </h2>
                     <div class="flex items-center gap-1">
-                        <button onclick="openPip('todo')" class="p-2 hover:bg-gray-400/20 rounded transition text-lg cursor-pointer text-themeText opacity-70 hover:opacity-100" title="ピクチャインピクチャ">
+                        <button onclick="openPip('todo')" class="p-2.5 sm:p-2 hover:bg-gray-400/20 rounded transition text-xl sm:text-lg cursor-pointer text-themeText opacity-70 hover:opacity-100" title="ピクチャインピクチャ">
                             <i class="ph ph-picture-in-picture"></i>
                         </button>
-                        <button onclick="toggleSection('todo')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
+                        <button onclick="toggleSection('todo')" class="p-2.5 sm:p-2 hover:bg-gray-400/20 rounded transition text-2xl sm:text-xl cursor-pointer">
                             <i class="ph ph-caret-up" id="icon-toggle-todo"></i>
                         </button>
                     </div>
@@ -663,7 +663,7 @@
                             <input type="text" id="taskInput" placeholder="タスクを入力" class="flex-1 p-3 bg-transparent border-none focus:outline-none text-sm sm:text-base" oninput="handleTaskInput()" onfocus="handleTaskInput()">
                             
                             <!-- 期限ボタンを視覚的にわかりやすく変更 -->
-                            <button id="datePickerBtn" onclick="window.openDatePicker()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gray-400/10 hover:bg-gray-400/20 transition text-xs font-medium text-themeText opacity-80 mr-1">
+                            <button id="datePickerBtn" onclick="window.openDatePicker()" class="flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-gray-400/10 hover:bg-gray-400/20 transition text-xs sm:text-sm font-medium text-themeText opacity-80 mr-1 whitespace-nowrap flex-shrink-0">
                                 <i class="ph ph-calendar-blank text-base" id="calendarIcon"></i>
                                 <span id="selectedDueDateText" data-date="">期限</span>
                             </button>
@@ -686,10 +686,10 @@
                         <i class="ph ph-timer"></i> Focus Timer
                     </h2>
                     <div class="flex items-center gap-1">
-                        <button onclick="openPip('timer')" class="p-2 hover:bg-gray-400/20 rounded transition text-lg cursor-pointer text-themeText opacity-70 hover:opacity-100" title="ピクチャインピクチャ">
+                        <button onclick="openPip('timer')" class="p-2.5 sm:p-2 hover:bg-gray-400/20 rounded transition text-xl sm:text-lg cursor-pointer text-themeText opacity-70 hover:opacity-100" title="ピクチャインピクチャ">
                             <i class="ph ph-picture-in-picture"></i>
                         </button>
-                        <button onclick="toggleSection('timer')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
+                        <button onclick="toggleSection('timer')" class="p-2.5 sm:p-2 hover:bg-gray-400/20 rounded transition text-2xl sm:text-xl cursor-pointer">
                             <i class="ph ph-caret-up" id="icon-toggle-timer"></i>
                         </button>
                     </div>
@@ -699,7 +699,7 @@
                         <span id="timerModeLabel" class="text-xs font-bold px-3 py-1 rounded-full bg-themePrimary/10 text-themePrimary mb-2 border border-themePrimary/20">集中</span>
                         <div id="activeTaskDisplay" class="text-base sm:text-lg font-medium opacity-90 truncate px-2 max-w-full">タスクを選択してください</div>
                     </div>
-                    <div class="text-[5rem] sm:text-7xl font-bold font-mono tracking-tighter mb-6 leading-none transition select-none" id="timerDisplay">25:00</div>
+                    <div class="text-[5.5rem] sm:text-7xl font-bold font-mono tracking-tighter mb-6 leading-none transition select-none" id="timerDisplay">25:00</div>
                     <div class="flex justify-center gap-4 relative z-10">
                         <button onclick="toggleTimer()" class="p-4 rounded-full bg-themePrimary text-white hover:opacity-90 transition shadow-md w-16 h-16 sm:w-20 sm:h-20 flex items-center justify-center">
                             <i class="ph ph-play text-2xl sm:text-3xl" id="playPauseIcon"></i>
@@ -721,10 +721,10 @@
                         <i class="ph ph-speaker-hifi"></i> オーディオ
                     </h2>
                     <div class="flex items-center gap-1">
-                        <button onclick="openPip('audio')" class="p-2 hover:bg-gray-400/20 rounded transition text-lg cursor-pointer text-themeText opacity-70 hover:opacity-100" title="ピクチャインピクチャ">
+                        <button onclick="openPip('audio')" class="p-2.5 sm:p-2 hover:bg-gray-400/20 rounded transition text-xl sm:text-lg cursor-pointer text-themeText opacity-70 hover:opacity-100" title="ピクチャインピクチャ">
                             <i class="ph ph-picture-in-picture"></i>
                         </button>
-                        <button onclick="toggleSection('audio')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
+                        <button onclick="toggleSection('audio')" class="p-2.5 sm:p-2 hover:bg-gray-400/20 rounded transition text-2xl sm:text-xl cursor-pointer">
                             <i class="ph ph-caret-up" id="icon-toggle-audio"></i>
                         </button>
                     </div>
@@ -739,16 +739,16 @@
                     <!-- Local Audio -->
                     <div id="tabContent_local" class="space-y-4">
                         <div class="flex items-center gap-1 sm:gap-2 mb-2">
-                            <select id="playlistSelector" onchange="changePlaylist()" class="flex-1 w-0 p-2 rounded-lg bg-themeBg border border-gray-400/30 focus:outline-none text-xs sm:text-sm truncate">
+                            <select id="playlistSelector" onchange="changePlaylist()" class="flex-1 w-0 h-10 px-2 rounded-lg bg-themeBg border border-gray-400/30 focus:outline-none text-xs sm:text-sm truncate">
                             </select>
-                            <button onclick="createNewPlaylist()" class="px-2 sm:px-3 py-2 rounded-lg bg-themePrimary text-white text-xs sm:text-sm hover:opacity-90 transition whitespace-nowrap shadow-sm flex items-center justify-center"><i class="ph ph-plus"></i><span class="hidden sm:inline ml-1">新規</span></button>
+                            <button onclick="createNewPlaylist()" class="w-10 h-10 sm:w-auto sm:px-3 rounded-lg bg-themePrimary text-white text-xs sm:text-sm hover:opacity-90 transition whitespace-nowrap shadow-sm flex items-center justify-center flex-shrink-0"><i class="ph ph-plus text-base"></i><span class="hidden sm:inline ml-1">新規</span></button>
                             
-                            <button onclick="openEnvModal()" class="relative px-2 sm:px-3 py-2 rounded-lg bg-indigo-500 text-white text-xs sm:text-sm hover:opacity-90 transition whitespace-nowrap shadow-sm flex items-center justify-center gap-1" title="環境音ミキサー">
+                            <button onclick="openEnvModal()" class="relative w-10 h-10 sm:w-auto sm:px-3 rounded-lg bg-indigo-500 text-white text-xs sm:text-sm hover:opacity-90 transition whitespace-nowrap shadow-sm flex items-center justify-center gap-1 flex-shrink-0" title="環境音ミキサー">
                                 <i class="ph ph-waves text-base"></i><span class="hidden sm:inline">環境音</span>
                                 <span id="envActiveBadge" class="hidden absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-themeBg"></span>
                             </button>
 
-                            <button id="btnDeletePlaylist" onclick="deleteCurrentPlaylist()" class="px-2 sm:px-3 py-2 rounded-lg border border-red-500/50 text-red-500 text-xs sm:text-sm hover:bg-red-500/10 transition whitespace-nowrap flex items-center justify-center"><i class="ph ph-trash text-base"></i></button>
+                            <button id="btnDeletePlaylist" onclick="deleteCurrentPlaylist()" class="w-10 h-10 sm:w-auto sm:px-3 rounded-lg border border-red-500/50 text-red-500 text-xs sm:text-sm hover:bg-red-500/10 transition whitespace-nowrap flex items-center justify-center flex-shrink-0"><i class="ph ph-trash text-base sm:text-lg"></i></button>
                         </div>
                         <div id="dropZone" class="flex items-center gap-4 transition-colors duration-200">
                             <label class="flex-1 cursor-pointer bg-themeBg border-2 border-dashed border-gray-400 p-4 sm:p-6 rounded-lg text-center hover:bg-themePrimary/10 transition">
@@ -778,9 +778,9 @@
                                     </div>
                                 </div>
                                 <div class="flex gap-2 sm:gap-4 items-center mx-auto sm:mx-0">
-                                    <button onclick="playPrevTrack()" class="hover:opacity-70 disabled:opacity-30" id="btnPrevTrack" disabled><i class="ph ph-skip-back-circle text-xl sm:text-2xl"></i></button>
-                                    <button onclick="toggleAudio()" class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-themePrimary text-white flex items-center justify-center hover:opacity-90 disabled:opacity-50 shadow-md" id="btnPlayAudio" disabled><i class="ph ph-play text-lg sm:text-xl" id="audioPlayIcon"></i></button>
-                                    <button onclick="playNextTrack()" class="hover:opacity-70 disabled:opacity-30" id="btnNextTrack" disabled><i class="ph ph-skip-forward-circle text-xl sm:text-2xl"></i></button>
+                                    <button onclick="playPrevTrack()" class="w-10 h-10 flex items-center justify-center hover:opacity-70 disabled:opacity-30 rounded-full" id="btnPrevTrack" disabled><i class="ph ph-skip-back-circle text-3xl"></i></button>
+                                    <button onclick="toggleAudio()" class="w-12 h-12 sm:w-12 sm:h-12 rounded-full bg-themePrimary text-white flex items-center justify-center hover:opacity-90 disabled:opacity-50 shadow-md" id="btnPlayAudio" disabled><i class="ph ph-play text-lg sm:text-xl" id="audioPlayIcon"></i></button>
+                                    <button onclick="playNextTrack()" class="w-10 h-10 flex items-center justify-center hover:opacity-70 disabled:opacity-30 rounded-full" id="btnNextTrack" disabled><i class="ph ph-skip-forward-circle text-3xl"></i></button>
                                 </div>
                             </div>
                         </div>
@@ -812,9 +812,9 @@
                             <div class="flex flex-wrap justify-between items-center pt-2 gap-y-3">
                                 <div class="w-16 hidden sm:block"></div> 
                                 <div class="flex justify-center items-center gap-4 sm:gap-6 mx-auto sm:mx-0">
-                                    <button onclick="prevSpotifyTrack()" class="hover:opacity-70 transition"><i class="ph ph-skip-back text-lg sm:text-xl"></i></button>
-                                    <button onclick="toggleSpotifyPlay()" class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-[#1DB954] text-white flex items-center justify-center hover:opacity-90 transition shadow-md"><i class="ph ph-play text-lg sm:text-xl" id="sp-play-icon"></i></button>
-                                    <button onclick="nextSpotifyTrack()" class="hover:opacity-70 transition"><i class="ph ph-skip-forward text-lg sm:text-xl"></i></button>
+                                    <button onclick="prevSpotifyTrack()" class="w-10 h-10 flex items-center justify-center hover:bg-gray-400/10 rounded-full transition"><i class="ph-fill ph-skip-back text-2xl opacity-80"></i></button>
+                                    <button onclick="toggleSpotifyPlay()" class="w-12 h-12 sm:w-12 sm:h-12 rounded-full bg-[#1DB954] text-white flex items-center justify-center hover:opacity-90 transition shadow-md"><i class="ph ph-play text-lg sm:text-xl" id="sp-play-icon"></i></button>
+                                    <button onclick="nextSpotifyTrack()" class="w-10 h-10 flex items-center justify-center hover:bg-gray-400/10 rounded-full transition"><i class="ph-fill ph-skip-forward text-2xl opacity-80"></i></button>
                                 </div>
                                 <div class="flex justify-end items-center gap-1 sm:gap-2 w-full sm:w-24">
                                     <i class="ph ph-speaker-high text-xs sm:text-sm opacity-70"></i>
@@ -875,9 +875,9 @@
                                     </button>
                                 </div>
                                 <div class="flex gap-2 sm:gap-4 items-center mx-auto sm:mx-0">
-                                    <button onclick="skipPodcast(-15)" class="hover:opacity-70 disabled:opacity-30 flex items-center justify-center" id="pc-btn-skip-back" disabled><i class="ph ph-rewind text-lg sm:text-xl"></i></button>
-                                    <button onclick="togglePodcastPlay()" class="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-themePrimary text-white flex items-center justify-center hover:opacity-90 disabled:opacity-50 shadow-md" id="pc-btn-play"><i class="ph ph-play text-lg sm:text-xl" id="pc-play-icon"></i></button>
-                                    <button onclick="skipPodcast(15)" class="hover:opacity-70 disabled:opacity-30 flex items-center justify-center" id="pc-btn-skip-forward" disabled><i class="ph ph-fast-forward text-lg sm:text-xl"></i></button>
+                                    <button onclick="skipPodcast(-15)" class="w-10 h-10 flex items-center justify-center hover:bg-gray-400/10 rounded-full transition disabled:opacity-30" id="pc-btn-skip-back" disabled><i class="ph-fill ph-rewind text-2xl opacity-80"></i></button>
+                                    <button onclick="togglePodcastPlay()" class="w-12 h-12 sm:w-12 sm:h-12 rounded-full bg-themePrimary text-white flex items-center justify-center hover:opacity-90 disabled:opacity-50 shadow-md" id="pc-btn-play"><i class="ph ph-play text-lg sm:text-xl" id="pc-play-icon"></i></button>
+                                    <button onclick="skipPodcast(15)" class="w-10 h-10 flex items-center justify-center hover:bg-gray-400/10 rounded-full transition disabled:opacity-30" id="pc-btn-skip-forward" disabled><i class="ph-fill ph-fast-forward text-2xl opacity-80"></i></button>
                                 </div>
                             </div>
                         </div>
@@ -901,7 +901,7 @@
                         <i class="ph ph-dots-six-vertical opacity-50"></i>
                         <i class="ph ph-chart-bar"></i> 記録
                     </h2>
-                    <button onclick="toggleSection('chart')" class="p-2 hover:bg-gray-400/20 rounded transition text-xl cursor-pointer">
+                    <button onclick="toggleSection('chart')" class="p-2.5 sm:p-2 hover:bg-gray-400/20 rounded transition text-2xl sm:text-xl cursor-pointer">
                         <i class="ph ph-caret-up" id="icon-toggle-chart"></i>
                     </button>
                 </div>
@@ -1546,7 +1546,7 @@
                 container.innerHTML += `
                     <div>
                         <input type="radio" name="category" id="cat_${cat.id}" value="${cat.id}" class="category-radio" ${checked}>
-                        <label for="cat_${cat.id}" class="flex items-center gap-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full border border-gray-400/50 cursor-pointer hover:bg-gray-400/20 transition text-[10px] sm:text-sm">
+                        <label for="cat_${cat.id}" class="flex items-center gap-1 px-3.5 sm:px-4 py-2 sm:py-2 rounded-full border border-gray-400/50 cursor-pointer hover:bg-gray-400/20 transition text-xs sm:text-sm">
                             <i class="ph ${cat.icon}"></i> ${cat.name}
                         </label>
                     </div>
@@ -1799,8 +1799,8 @@
                 
                 li.innerHTML = `
                     <div class="flex items-center gap-2 overflow-hidden flex-1 pl-1">
-                        <i class="ph ph-dots-six-vertical opacity-30 hover:opacity-100 cursor-grab text-lg sm:text-xl task-drag-handle flex-shrink-0" title="ドラッグして並び替え"></i>
-                        <button onclick="toggleTaskCompletion('${task.id}', ${task.completed}); event.stopPropagation();" class="flex-shrink-0 w-5 h-5 sm:w-6 sm:h-6 rounded-full border-2 border-themePrimary flex items-center justify-center text-themeBg ${task.completed ? 'bg-themePrimary' : ''}">
+                        <i class="ph ph-dots-six-vertical opacity-30 hover:opacity-100 cursor-grab text-2xl sm:text-xl p-1 task-drag-handle flex-shrink-0" title="ドラッグして並び替え"></i>
+                        <button onclick="toggleTaskCompletion('${task.id}', ${task.completed}); event.stopPropagation();" class="flex-shrink-0 w-6 h-6 sm:w-6 sm:h-6 rounded-full border-2 border-themePrimary flex items-center justify-center text-themeBg ${task.completed ? 'bg-themePrimary' : ''}">
                             ${task.completed ? '<i class="ph ph-check text-xs sm:text-sm font-bold"></i>' : ''}
                         </button>
                         <div class="flex-1 overflow-hidden cursor-pointer py-1" onclick="setActiveTask('${task.title}', '${task.categoryId}')">
