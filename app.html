@@ -95,6 +95,10 @@
                 await migrateLocalLogsToCloud(user.uid);
                 await migrateLocalPodcastFavsToCloud(user.uid);
 
+                if (window.loadCloudTimerState) {
+                    window.loadCloudTimerState(user.uid);
+                }
+
                 try {
                     const statsDoc = await window.getDoc(window.doc(window.db, "userStats", user.uid));
                     if (statsDoc.exists()) {
@@ -1895,6 +1899,132 @@
         let timeLeft = timerSettings.focusTime * 60;
         const alarmAudio = new Audio();
 
+        let lastCloudSaveState = { timeLeft: -1, pomodoroCount: -1 };
+        let cloudSaveTimestamps = [];
+        const MAX_CLOUD_SAVES_PER_MIN = 10;
+
+        window.saveTimerState = async function(trigger = 'tick') {
+            const d = new Date();
+            const todayStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+            const state = {
+                timeLeft: timeLeft,
+                timerMode: window.timerMode,
+                pomodoroCount: pomodoroCount,
+                savedDate: todayStr,
+                isRunning: window.isRunning
+            };
+            
+            // 1. ローカルは毎秒（毎回）保存
+            localStorage.setItem('workside_timer_state', JSON.stringify(state));
+            
+            // 2. クラウド保存の判定と制限
+            if (window.currentUser && window.setDoc && window.doc && window.db) {
+                let shouldCloudSave = false;
+                
+                if (trigger === 'count') {
+                    shouldCloudSave = true; // カウント時
+                } else if (['pause', 'reset', 'mode', 'settings'].includes(trigger)) {
+                    // 一時停止等では、前回クラウド保存時から秒数かセット数に変更がある場合のみ
+                    if (lastCloudSaveState.timeLeft !== timeLeft || lastCloudSaveState.pomodoroCount !== pomodoroCount) {
+                        shouldCloudSave = true;
+                    }
+                }
+
+                if (shouldCloudSave) {
+                    const now = Date.now();
+                    // 1分前より古い履歴を削除
+                    cloudSaveTimestamps = cloudSaveTimestamps.filter(t => now - t < 60000);
+                    
+                    if (cloudSaveTimestamps.length < MAX_CLOUD_SAVES_PER_MIN) {
+                        cloudSaveTimestamps.push(now);
+                        lastCloudSaveState.timeLeft = timeLeft;
+                        lastCloudSaveState.pomodoroCount = pomodoroCount;
+                        
+                        try {
+                            await window.setDoc(window.doc(window.db, "userTimerStates", window.currentUser.uid), state, { merge: true });
+                        } catch(e) { console.error("Save timer cloud error", e); }
+                    } else {
+                        console.warn("クラウド保存の制限に達しました（1分間あたりの回数制限）");
+                    }
+                }
+            }
+        };
+
+        
+        // 他タブとの状態同期処理（競合防止）
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'workside_timer_state' && e.newValue) {
+                try {
+                    const state = JSON.parse(e.newValue);
+                    const d = new Date();
+                    const todayStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                    
+                    if (state.savedDate === todayStr) {
+                        timeLeft = state.timeLeft;
+                        window.timerMode = state.timerMode || 'focus';
+                        pomodoroCount = state.pomodoroCount || 0;
+                        
+                        // 他タブで再生・停止が行われた場合、こちらのアイコン状態等も追従する
+                        if (state.isRunning !== undefined && state.isRunning !== window.isRunning) {
+                            window.isRunning = state.isRunning;
+                            const icon = document.getElementById('playPauseIcon');
+                            if (icon) {
+                                icon.className = window.isRunning ? "ph ph-pause text-2xl sm:text-3xl" : "ph ph-play text-2xl sm:text-3xl";
+                            }
+                            if (window.isRunning) {
+                                window.targetEndTime = Date.now() + (timeLeft * 1000);
+                            } else if (timerWorker) {
+                                getTimerWorker().postMessage('stop');
+                            }
+                        }
+                        
+                        if (typeof updateTimerUIState !== 'undefined') updateTimerUIState();
+                        if (typeof updateTimerDisplay !== 'undefined') updateTimerDisplay();
+                    }
+                } catch(err) { console.error("Sync error", err); }
+            }
+        });
+
+        window.loadLocalTimerState = function() {
+            const stateStr = localStorage.getItem('workside_timer_state');
+            if (stateStr) {
+                try {
+                    const state = JSON.parse(stateStr);
+                    const d = new Date();
+                    const todayStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                    if (state.savedDate === todayStr) {
+                        timeLeft = state.timeLeft;
+                        window.timerMode = state.timerMode || 'focus';
+                        pomodoroCount = state.pomodoroCount || 0;
+                    }
+                } catch(e) {}
+            }
+        };
+
+        window.loadCloudTimerState = async function(uid) {
+            if (window.isRunning) return; 
+            if (!window.getDoc || !window.doc || !window.db) return;
+            try {
+                const docSnap = await window.getDoc(window.doc(window.db, "userTimerStates", uid));
+                if (docSnap.exists()) {
+                    const state = docSnap.data();
+                    const d = new Date();
+                    const todayStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                    if (state.savedDate === todayStr) {
+                        timeLeft = state.timeLeft;
+                        window.timerMode = state.timerMode || 'focus';
+                        pomodoroCount = state.pomodoroCount || 0;
+                        
+                        lastCloudSaveState.timeLeft = timeLeft;
+                        lastCloudSaveState.pomodoroCount = pomodoroCount;
+                        
+                        if (typeof updateTimerUIState !== 'undefined') updateTimerUIState();
+                        if (typeof updateTimerDisplay !== 'undefined') updateTimerDisplay();
+                    }
+                }
+            } catch(e) {}
+        };
+
         let customAlarmData = { url: '', name: '' };
         let customFontData = [
             { url: '', name: '' },
@@ -1903,6 +2033,7 @@
         ];
 
         async function initTimerSystem() {
+            window.loadLocalTimerState();
             const alarmFile = await localforage.getItem('custom_alarm_file');
             if (alarmFile) {
                 customAlarmData.url = URL.createObjectURL(alarmFile);
@@ -2061,6 +2192,7 @@
                 else if (window.timerMode === 'longBreak') timeLeft = timerSettings.longBreakTime * 60;
                 
                 updateTimerDisplay();
+                window.saveTimerState('settings');
             }
             
             timerSettings.longBreakInterval = parseInt(document.getElementById('settingLongBreakInterval').value) || 4;
@@ -2122,6 +2254,7 @@
             else if (mode === 'longBreak') timeLeft = timerSettings.longBreakTime * 60;
             updateTimerUIState();
             updateTimerDisplay();
+            window.saveTimerState('mode');
         }
 
         function updateTimerUIState() {
@@ -2189,6 +2322,7 @@
             if (newTimeLeft !== timeLeft) {
                 timeLeft = newTimeLeft;
                 updateTimerDisplay();
+                window.saveTimerState('tick');
             }
             
             if (timeLeft <= 0) { 
@@ -2213,19 +2347,20 @@
                     
                     updateTimerUIState();
                     updateTimerDisplay();
-                    if (timerSettings.autoBreak) window.toggleTimer();
+                    if (timerSettings.autoBreak) window.toggleTimer(true);
                 } else if (window.timerMode === 'break' || window.timerMode === 'longBreak') {
                     // Both break and longBreak transition back to focus
                     window.timerMode = 'focus';
                     timeLeft = timerSettings.focusTime * 60;
                     updateTimerUIState();
                     updateTimerDisplay();
-                    if (timerSettings.autoFocus) window.toggleTimer();
+                    if (timerSettings.autoFocus) window.toggleTimer(true);
                 }
+                window.saveTimerState('count');
             }
         };
 
-        window.toggleTimer = function() {
+        window.toggleTimer = function(isAuto = false) {
             const icon = document.getElementById('playPauseIcon');
             if (window.isRunning) {
                 getTimerWorker().postMessage('stop');
@@ -2236,16 +2371,20 @@
                     timeLeft = Math.max(0, Math.ceil((window.targetEndTime - Date.now()) / 1000));
                 }
                 updateTimerDisplay(); 
+                window.saveTimerState('pause');
             } else {
                 icon.className = "ph ph-pause text-2xl sm:text-3xl";
                 window.isRunning = true;
                 
-                // タイマー再開時にアラームを停止
-                alarmAudio.pause();
-                alarmAudio.currentTime = 0;
+                // 手動でタイマーを再開した時のみアラームを停止（自動開始の時は鳴らし続ける）
+                if (!isAuto) {
+                    alarmAudio.pause();
+                    alarmAudio.currentTime = 0;
+                }
                 
                 window.targetEndTime = Date.now() + (timeLeft * 1000);
                 updateTimerDisplay(); 
+                window.saveTimerState('start');
                 
                 getTimerWorker().postMessage('start');
             }
@@ -2266,6 +2405,7 @@
             updateTimerUIState();
             document.getElementById('playPauseIcon').className = "ph ph-play text-2xl sm:text-3xl";
             updateTimerDisplay();
+            window.saveTimerState('reset');
         }
 
         document.addEventListener('visibilitychange', () => {
