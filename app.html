@@ -2053,10 +2053,32 @@
                 }
             }
             
+            // ページロード時：前回タブを閉じた際に未記録だった経過時間があれば確定させる
+            if (window.timerMode === 'focus' && typeof lastRecordedTimeLeft !== 'undefined' && typeof timeLeft !== 'undefined' && lastRecordedTimeLeft > timeLeft && !window.isRunning) {
+                const elapsedMinutes = (lastRecordedTimeLeft - timeLeft) / 60;
+                if (elapsedMinutes > 0 && window.saveStudyLog) {
+                    window.saveStudyLog(elapsedMinutes, window.currentActiveCategoryId);
+                }
+                lastRecordedTimeLeft = timeLeft;
+                window.saveTimerState('pause');
+            }
+
             applyTimerFonts();
             updateTimerUIState();
             updateTimerDisplay();
         }
+        
+        // サイトを閉じたとき・リロード時に記録を保存する
+        window.addEventListener('beforeunload', () => {
+            if (window.isRunning && window.timerMode === 'focus' && typeof lastRecordedTimeLeft !== 'undefined' && lastRecordedTimeLeft > timeLeft) {
+                const elapsedMinutes = (lastRecordedTimeLeft - Math.max(0, timeLeft)) / 60;
+                if (elapsedMinutes > 0 && window.saveStudyLog) {
+                    window.saveStudyLog(elapsedMinutes, window.currentActiveCategoryId);
+                }
+                lastRecordedTimeLeft = Math.max(0, timeLeft);
+                window.saveTimerState('pause');
+            }
+        });
 
         function applyTimerFonts() {
             const style = document.getElementById('customTimerFonts') || document.createElement('style');
@@ -2326,9 +2348,19 @@
             if (newTimeLeft < 0) newTimeLeft = 0;
             
             if (newTimeLeft !== timeLeft) {
+                const oldTimeLeft = timeLeft;
                 timeLeft = newTimeLeft;
                 updateTimerDisplay();
                 window.saveTimerState('tick');
+                
+                // 1分経過するごとにグラフを更新してリアルタイム反映
+                if (window.timerMode === 'focus' && typeof lastRecordedTimeLeft !== 'undefined' && lastRecordedTimeLeft > timeLeft) {
+                    const oldElapsedMins = Math.floor((lastRecordedTimeLeft - oldTimeLeft) / 60);
+                    const newElapsedMins = Math.floor((lastRecordedTimeLeft - timeLeft) / 60);
+                    if (newElapsedMins > oldElapsedMins) {
+                        if (typeof window.updateChart === 'function') window.updateChart();
+                    }
+                }
             }
             
             if (timeLeft <= 0) { 
@@ -2480,6 +2512,20 @@
                     dataMap[log.categoryId][idx] += log.duration;
                 }
             });
+            
+            // リアルタイム（ローカル）でのグラフ反映用：未記録の経過時間を加算
+            if (typeof window.timerMode !== 'undefined' && window.timerMode === 'focus' && typeof lastRecordedTimeLeft !== 'undefined' && typeof timeLeft !== 'undefined') {
+                const pendingMinutes = (lastRecordedTimeLeft - Math.max(0, timeLeft)) / 60;
+                if (pendingMinutes > 0) {
+                    const todayLabel = `${today.getMonth()+1}/${today.getDate()}`;
+                    const idx = labels.indexOf(todayLabel);
+                    const catId = window.currentActiveCategoryId || 'other';
+                    if (idx !== -1 && dataMap[catId]) {
+                        dataMap[catId][idx] += pendingMinutes;
+                    }
+                }
+            }
+            
             const datasets = categories.map(cat => ({ label: cat.name, data: dataMap[cat.id], backgroundColor: cat.color, borderWidth: 0, borderRadius: 4 }));
             window.studyChartInstance.data.labels = labels;
             window.studyChartInstance.data.datasets = datasets;
