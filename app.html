@@ -1897,6 +1897,7 @@
         if (typeof timerSettings.activeFontIndex === 'undefined') timerSettings.activeFontIndex = 0;
 
         let timeLeft = timerSettings.focusTime * 60;
+        let lastRecordedTimeLeft = timeLeft;
         const alarmAudio = new Audio();
 
         let lastCloudSaveState = { timeLeft: -1, pomodoroCount: -1 };
@@ -1908,6 +1909,7 @@
             const todayStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
             const state = {
                 timeLeft: timeLeft,
+                lastRecordedTimeLeft: lastRecordedTimeLeft,
                 timerMode: window.timerMode,
                 pomodoroCount: pomodoroCount,
                 savedDate: todayStr,
@@ -1961,6 +1963,7 @@
                     
                     if (state.savedDate === todayStr) {
                         timeLeft = state.timeLeft;
+                        lastRecordedTimeLeft = state.lastRecordedTimeLeft !== undefined ? state.lastRecordedTimeLeft : state.timeLeft;
                         window.timerMode = state.timerMode || 'focus';
                         pomodoroCount = state.pomodoroCount || 0;
                         
@@ -1994,6 +1997,7 @@
                     const todayStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
                     if (state.savedDate === todayStr) {
                         timeLeft = state.timeLeft;
+                        lastRecordedTimeLeft = state.lastRecordedTimeLeft !== undefined ? state.lastRecordedTimeLeft : state.timeLeft;
                         window.timerMode = state.timerMode || 'focus';
                         pomodoroCount = state.pomodoroCount || 0;
                     }
@@ -2012,6 +2016,7 @@
                     const todayStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
                     if (state.savedDate === todayStr) {
                         timeLeft = state.timeLeft;
+                        lastRecordedTimeLeft = state.lastRecordedTimeLeft !== undefined ? state.lastRecordedTimeLeft : state.timeLeft;
                         window.timerMode = state.timerMode || 'focus';
                         pomodoroCount = state.pomodoroCount || 0;
                         
@@ -2252,6 +2257,7 @@
             if (mode === 'focus') timeLeft = timerSettings.focusTime * 60;
             else if (mode === 'break') timeLeft = timerSettings.breakTime * 60;
             else if (mode === 'longBreak') timeLeft = timerSettings.longBreakTime * 60;
+            lastRecordedTimeLeft = timeLeft;
             updateTimerUIState();
             updateTimerDisplay();
             window.saveTimerState('mode');
@@ -2333,7 +2339,10 @@
                 playTimerAlarm();
 
                 if (window.timerMode === 'focus') {
-                    if (window.saveStudyLog) window.saveStudyLog(timerSettings.focusTime, window.currentActiveCategoryId);
+                    if (lastRecordedTimeLeft > 0) {
+                        const elapsedMinutes = lastRecordedTimeLeft / 60;
+                        if (elapsedMinutes > 0 && window.saveStudyLog) window.saveStudyLog(elapsedMinutes, window.currentActiveCategoryId);
+                    }
                     pomodoroCount++;
                     
                     if (pomodoroCount >= timerSettings.longBreakInterval) {
@@ -2344,6 +2353,7 @@
                         window.timerMode = 'break';
                         timeLeft = timerSettings.breakTime * 60;
                     }
+                    lastRecordedTimeLeft = timeLeft;
                     
                     updateTimerUIState();
                     updateTimerDisplay();
@@ -2352,6 +2362,7 @@
                     // Both break and longBreak transition back to focus
                     window.timerMode = 'focus';
                     timeLeft = timerSettings.focusTime * 60;
+                    lastRecordedTimeLeft = timeLeft;
                     updateTimerUIState();
                     updateTimerDisplay();
                     if (timerSettings.autoFocus) window.toggleTimer(true);
@@ -2370,6 +2381,13 @@
                 if (window.targetEndTime > 0) {
                     timeLeft = Math.max(0, Math.ceil((window.targetEndTime - Date.now()) / 1000));
                 }
+                
+                if (window.timerMode === 'focus' && lastRecordedTimeLeft > timeLeft) {
+                    const elapsedMinutes = (lastRecordedTimeLeft - timeLeft) / 60;
+                    if (elapsedMinutes > 0 && window.saveStudyLog) window.saveStudyLog(elapsedMinutes, window.currentActiveCategoryId);
+                    lastRecordedTimeLeft = timeLeft;
+                }
+                
                 updateTimerDisplay(); 
                 window.saveTimerState('pause');
             } else {
@@ -2398,9 +2416,16 @@
             alarmAudio.pause();
             alarmAudio.currentTime = 0;
             
+            if (window.timerMode === 'focus' && lastRecordedTimeLeft > Math.max(0, timeLeft)) {
+                const elapsedMinutes = (lastRecordedTimeLeft - Math.max(0, timeLeft)) / 60;
+                if (elapsedMinutes > 0 && window.saveStudyLog) window.saveStudyLog(elapsedMinutes, window.currentActiveCategoryId);
+            }
+            
             if (window.timerMode === 'focus') timeLeft = timerSettings.focusTime * 60;
             else if (window.timerMode === 'break') timeLeft = timerSettings.breakTime * 60;
             else if (window.timerMode === 'longBreak') timeLeft = timerSettings.longBreakTime * 60;
+            
+            lastRecordedTimeLeft = timeLeft;
             
             updateTimerUIState();
             document.getElementById('playPauseIcon').className = "ph ph-play text-2xl sm:text-3xl";
@@ -2790,7 +2815,7 @@
 
         // --- Spotify ---
         const SPOTIFY_CLIENT_ID = '441ef1f8a6b6494cb9431477b9374afd'; 
-        const REDIRECT_URI = 'https://sukumizuyoujo.github.io/study-tool/app.html'; 
+        const REDIRECT_URI = 'https://sukumizuyoujo.github.io/study-tool/'; 
         let spotifyToken = localStorage.getItem('spotify_access_token');
         let spotifyPlayer = null;
 
